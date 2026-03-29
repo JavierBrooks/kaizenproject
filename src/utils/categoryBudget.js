@@ -1,0 +1,119 @@
+import { collection, getDocs } from "firebase/firestore";
+
+export function transactionToDate(createdAt) {
+  if (!createdAt) return null;
+  if (typeof createdAt.toDate === "function") return createdAt.toDate();
+  const d = new Date(createdAt);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** @returns {"income" | "expense"} */
+export function getCategoryKind(cat) {
+  if (cat && cat.kind === "income") return "income";
+  return "expense";
+}
+
+/** Sum income amounts for a category within the calendar month of referenceDate. */
+export function sumIncomeForCategoryInMonth(
+  transactions,
+  categoryName,
+  referenceDate = new Date()
+) {
+  const y = referenceDate.getFullYear();
+  const m = referenceDate.getMonth();
+  const start = new Date(y, m, 1, 0, 0, 0, 0);
+  const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.type !== "income") continue;
+    if (String(t.category) !== String(categoryName)) continue;
+    const d = transactionToDate(t.createdAt);
+    if (!d || d < start || d > end) continue;
+    sum += Number(t.amount);
+  }
+  return sum;
+}
+
+/** Sum expense amounts for a category within the calendar month of referenceDate. */
+export function sumExpenseForCategoryInMonth(
+  transactions,
+  categoryName,
+  referenceDate = new Date()
+) {
+  const y = referenceDate.getFullYear();
+  const m = referenceDate.getMonth();
+  const start = new Date(y, m, 1, 0, 0, 0, 0);
+  const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
+
+  let sum = 0;
+  for (const t of transactions) {
+    if (t.type !== "expense") continue;
+    if (String(t.category) !== String(categoryName)) continue;
+    const d = transactionToDate(t.createdAt);
+    if (!d || d < start || d > end) continue;
+    sum += Number(t.amount);
+  }
+  return sum;
+}
+
+export async function fetchUserCategories(db, userId) {
+  const snapshot = await getDocs(
+    collection(db, "users", userId, "categories")
+  );
+  return snapshot.docs.map((docSnap) => ({
+    id: docSnap.id,
+    ...docSnap.data(),
+  }));
+}
+
+/**
+ * @returns {{ blocked: boolean, spent: number, budget: number, remaining: number, message?: string }}
+ */
+export function evaluateExpenseAgainstBudget(
+  transactions,
+  categoryName,
+  monthlyBudget,
+  additionalExpenseAmount,
+  referenceDate = new Date()
+) {
+  const budget = Number(monthlyBudget);
+  if (!Number.isFinite(budget) || budget < 0) {
+    return {
+      blocked: false,
+      spent: 0,
+      budget: 0,
+      remaining: Infinity,
+    };
+  }
+
+  const spent = sumExpenseForCategoryInMonth(
+    transactions,
+    categoryName,
+    referenceDate
+  );
+  const after = spent + additionalExpenseAmount;
+  const remaining = Math.max(0, budget - spent);
+
+  if (after > budget + 1e-9) {
+    const fmt = (n) =>
+      new Intl.NumberFormat(undefined, {
+        style: "currency",
+        currency: "USD",
+      }).format(n);
+    return {
+      blocked: true,
+      spent,
+      budget,
+      remaining,
+      message:
+        `This expense would put "${categoryName}" over its monthly budget.\n\n` +
+        `Spent this month: ${fmt(spent)}\n` +
+        `Budget: ${fmt(budget)}\n` +
+        `Remaining before this charge: ${fmt(remaining)}\n` +
+        `This transaction was not saved.`,
+    };
+  }
+
+  return { blocked: false, spent, budget, remaining: budget - after };
+}

@@ -1,0 +1,117 @@
+rules_version = '2';
+
+/**
+ * Kaizen Budget — Firestore security rules
+ *
+ * Data layout (matches the React app):
+ *   users/{userId}/accounts/{accountId}
+ *   users/{userId}/transactions/{transactionId}
+ *   users/{userId}/categories/{categoryId}
+ *
+ * Only the signed-in user whose UID equals {userId} may read/write these paths.
+ * The parent document users/{userId} is not used by the app and is locked down.
+ */
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    /** Accounts: name + balance */
+    function validAccountWrite() {
+      let d = request.resource.data;
+      return d.keys().hasAll(['name', 'balance'])
+        && d.name is string
+        && d.name.size() > 0
+        && d.name.size() < 200
+        && d.balance is number;
+    }
+
+    /**
+     * Categories (single return — Firestore rules do not allow if/else in functions):
+     *   income  -> { name, kind: "income" }
+     *   expense -> { name, budget } or { name, budget, kind: "expense" }
+     */
+    function validCategoryWrite() {
+      let d = request.resource.data;
+      return (d.name is string && d.name.size() > 0 && d.name.size() < 200)
+        && (
+          (d.keys().hasOnly(['name', 'kind']) && d.kind == 'income')
+          || (
+            d.keys().hasAll(['budget'])
+            && (d.budget is number)
+            && d.budget >= 0
+            && (
+              d.keys().hasOnly(['name', 'budget'])
+              || (
+                d.keys().hasOnly(['name', 'budget', 'kind'])
+                && d.kind == 'expense'
+              )
+            )
+          )
+        );
+    }
+
+    /** Transactions created / read by the app */
+    function validTransactionWrite() {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          'desc',
+          'amount',
+          'type',
+          'category',
+          'accountId',
+          'createdAt'
+        ])
+        && d.desc is string
+        && d.desc.size() < 500
+        && d.amount is number
+        && d.amount >= 0
+        && d.type is string
+        && (d.type == 'income' || d.type == 'expense')
+        && d.category is string
+        && d.category.size() > 0
+        && d.category.size() < 200
+        && d.accountId is string
+        && d.accountId.size() > 0
+        && d.createdAt is timestamp;
+    }
+
+    /* No direct access to the user root document (subcollections still work). */
+    match /users/{userId} {
+      allow read, write: if false;
+    }
+
+    match /users/{userId}/accounts/{accountId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validAccountWrite();
+      allow update: if isOwner(userId) && validAccountWrite();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/categories/{categoryId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validCategoryWrite();
+      allow update: if isOwner(userId) && validCategoryWrite();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/transactions/{transactionId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validTransactionWrite();
+      /* Current app only creates and deletes transactions, not updates. */
+      allow update: if false;
+      allow delete: if isOwner(userId);
+    }
+
+    /* Deny everything else by default. */
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
