@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { db } from "../firebase";
 import {
   collection,
@@ -7,6 +7,7 @@ import {
   getDoc,
   deleteDoc,
   writeBatch,
+  Timestamp,
 } from "firebase/firestore";
 import {
   formatTransactionDate,
@@ -14,12 +15,27 @@ import {
   money,
   fetchUserTransactions,
 } from "../utils/transactionHelpers";
+import {
+  fetchUserCategories,
+  getCategoryKind,
+  transactionToDate,
+} from "../utils/categoryBudget";
 
 export default function TransactionList({ user }) {
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
+  const [editingTransactionId, setEditingTransactionId] = useState(null);
+  const [editForm, setEditForm] = useState({
+    date: "",
+    type: "expense",
+    accountId: "",
+    category: "",
+    amount: "",
+  });
 
   const loadAccounts = async () => {
     const snapshot = await getDocs(
@@ -39,10 +55,21 @@ export default function TransactionList({ user }) {
     setTransactions(data);
   };
 
+  const loadCategories = async () => {
+    const list = await fetchUserCategories(db, user.uid);
+    list.sort((a, b) =>
+      String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, {
+        sensitivity: "base",
+      })
+    );
+    setCategories(list);
+  };
+
   useEffect(() => {
     if (!user) return;
     loadAccounts();
     loadTransactions();
+    loadCategories();
   }, [user]);
 
   const toggleTransactionRow = (id) => {
@@ -103,6 +130,153 @@ export default function TransactionList({ user }) {
     }
   };
 
+  const toDateInputValue = (createdAt) => {
+    const source = transactionToDate(createdAt) ?? new Date();
+    const d = new Date(source.getTime() - source.getTimezoneOffset() * 60000);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const startEditing = (t) => {
+    setEditingTransactionId(t.id);
+    setEditForm({
+      date: toDateInputValue(t.createdAt),
+      type: t.type === "income" ? "income" : "expense",
+      accountId: t.accountId ?? "",
+      category: t.category ? String(t.category) : "",
+      amount: String(Number(t.amount) || 0),
+    });
+  };
+
+  const closeEditModal = () => {
+    if (savingEdit) return;
+    setEditingTransactionId(null);
+  };
+
+  const editingTransaction = useMemo(
+    () => transactions.find((t) => t.id === editingTransactionId) ?? null,
+    [transactions, editingTransactionId]
+  );
+
+  const categoriesForEditType = useMemo(
+    () => categories.filter((c) => getCategoryKind(c) === editForm.type),
+    [categories, editForm.type]
+  );
+
+  useEffect(() => {
+    if (!editingTransactionId) return;
+    if (categoriesForEditType.length === 0) {
+      setEditForm((prev) => ({ ...prev, category: "" }));
+      return;
+    }
+    setEditForm((prev) => {
+      if (prev.category && categoriesForEditType.some((c) => c.name === prev.category)) {
+        return prev;
+      }
+      return { ...prev, category: categoriesForEditType[0].name };
+    });
+  }, [categoriesForEditType, editingTransactionId]);
+
+  const saveEdit = async () => {
+    if (!editingTransaction || !user) return;
+
+    if (!editForm.date) {
+      alert("Select a date.");
+      return;
+    }
+    if (!editForm.accountId) {
+      alert("Select an account.");
+      return;
+    }
+    if (categoriesForEditType.length === 0) {
+      alert(
+        editForm.type === "income"
+          ? "Create at least one income category before switching to income."
+          : "Create at least one expense category before switching to expense."
+      );
+      return;
+    }
+    if (!editForm.category) {
+      alert("Select a category.");
+      return;
+    }
+
+    const parsedAmount = Number(editForm.amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount < 0) {
+      alert("Enter a valid amount.");
+      return;
+    }
+
+    const parsedDate = new Date(`${editForm.date}T12:00:00`);
+    if (Number.isNaN(parsedDate.getTime())) {
+      alert("Enter a valid date.");
+      return;
+    }
+
+    const oldAmount = Number(editingTransaction.amount);
+    if (!Number.isFinite(oldAmount) || oldAmount < 0) {
+      alert("Current transaction amount is invalid.");
+      return;
+    }
+
+    const oldAccountId = editingTransaction.accountId;
+    const newAccountId = editForm.accountId;
+    const oldType = editingTransaction.type === "income" ? "income" : "expense";
+    const newType = editForm.type === "income" ? "income" : "expense";
+
+    setSavingEdit(true);
+    try {
+      const userId = user.uid;
+      const txnRef = doc(db, "users", userId, "transactions", editingTransaction.id);
+      const batch = writeBatch(db);
+      const accountDeltas = {};
+
+      if (oldAccountId) {
+        accountDeltas[oldAccountId] =
+          (accountDeltas[oldAccountId] ?? 0) +
+          (oldType === "income" ? -oldAmount : oldAmount);
+      }
+      if (newAccountId) {
+        accountDeltas[newAccountId] =
+          (accountDeltas[newAccountId] ?? 0) +
+          (newType === "income" ? parsedAmount : -parsedAmount);
+      }
+
+      const touchedAccountIds = Object.keys(accountDeltas).filter(
+        (id) => Math.abs(accountDeltas[id]) > 1e-9
+      );
+      for (const accountId of touchedAccountIds) {
+        const accountRef = doc(db, "users", userId, "accounts", accountId);
+        const snap = await getDoc(accountRef);
+        if (!snap.exists()) {
+          alert("One of the selected accounts no longer exists.");
+          setSavingEdit(false);
+          return;
+        }
+        const currentBalance = Number(snap.data().balance) || 0;
+        batch.update(accountRef, {
+          balance: currentBalance + accountDeltas[accountId],
+        });
+      }
+
+      batch.update(txnRef, {
+        type: newType,
+        accountId: newAccountId,
+        category: editForm.category,
+        amount: parsedAmount,
+        createdAt: Timestamp.fromDate(parsedDate),
+      });
+
+      await batch.commit();
+      await loadTransactions();
+      await loadAccounts();
+      setEditingTransactionId(null);
+    } catch (err) {
+      alert(err.message ?? "Could not update transaction.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const accountNameById = Object.fromEntries(
     accounts.map((a) => [a.id, a.name])
   );
@@ -122,10 +296,12 @@ export default function TransactionList({ user }) {
       ) : (
         <>
           <p className="hint-select-row show-mobile-only">
-            Tap a transaction to show <strong>Remove</strong>.
+            Tap a transaction to show <strong>Edit</strong> and{" "}
+            <strong>Remove</strong>.
           </p>
           <p className="hint-select-row show-desktop-only">
-            Select a row to show <strong>Remove</strong>.
+            Select a row to show <strong>Edit</strong> and{" "}
+            <strong>Remove</strong>.
           </p>
 
           <ul className="mobile-entity-list show-mobile-only">
@@ -155,14 +331,23 @@ export default function TransactionList({ user }) {
                     </div>
                     <div className="txn-mobile__meta">
                       {isIncome ? "Income" : "Expense"} ·{" "}
+                      {t.category ? String(t.category) : "—"} ·{" "}
                       {accountNameById[t.accountId] ?? "—"}
                     </div>
                   </div>
                   {isSelected && (
                     <div
-                      className="mobile-entity-list__actions"
+                      className="mobile-entity-list__actions account-actions-row"
                       onClick={(e) => e.stopPropagation()}
                     >
+                      <button
+                        type="button"
+                        className="btn btn--subtle"
+                        onClick={() => startEditing(t)}
+                        disabled={busy || deletingId !== null}
+                      >
+                        Edit
+                      </button>
                       <button
                         type="button"
                         className="btn btn--danger"
@@ -185,6 +370,7 @@ export default function TransactionList({ user }) {
                   <th>Date</th>
                   <th>Type</th>
                   <th>Account</th>
+                  <th>Category</th>
                   <th className="num">Amount</th>
                   <th aria-label="Actions" />
                 </tr>
@@ -212,22 +398,38 @@ export default function TransactionList({ user }) {
                       <td>{formatTransactionDate(t.createdAt)}</td>
                       <td>{isIncome ? "Income" : "Expense"}</td>
                       <td>{accountNameById[t.accountId] ?? "—"}</td>
+                      <td>{t.category ? String(t.category) : "—"}</td>
                       <td className="num">{amountStr}</td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {isSelected ? (
-                          <button
-                            type="button"
-                            className="btn btn--danger"
-                            style={{
-                              padding: "0.4rem 0.65rem",
-                              fontSize: "0.82rem",
-                            }}
-                            onClick={() => removeTransaction(t)}
-                            disabled={busy || deletingId !== null}
-                            aria-label={`Remove transaction on ${formatTransactionDate(t.createdAt)}`}
-                          >
-                            {busy ? "…" : "Remove"}
-                          </button>
+                          <div className="account-actions-row account-actions-row--compact">
+                            <button
+                              type="button"
+                              className="btn btn--subtle"
+                              style={{
+                                padding: "0.4rem 0.65rem",
+                                fontSize: "0.82rem",
+                              }}
+                              onClick={() => startEditing(t)}
+                              disabled={busy || deletingId !== null}
+                              aria-label={`Edit transaction on ${formatTransactionDate(t.createdAt)}`}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--danger"
+                              style={{
+                                padding: "0.4rem 0.65rem",
+                                fontSize: "0.82rem",
+                              }}
+                              onClick={() => removeTransaction(t)}
+                              disabled={busy || deletingId !== null}
+                              aria-label={`Remove transaction on ${formatTransactionDate(t.createdAt)}`}
+                            >
+                              {busy ? "…" : "Remove"}
+                            </button>
+                          </div>
                         ) : null}
                       </td>
                     </tr>
@@ -238,6 +440,131 @@ export default function TransactionList({ user }) {
           </div>
         </>
       )}
+      {editingTransaction ? (
+        <div
+          className="txn-edit-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="txn-edit-title"
+          onClick={closeEditModal}
+        >
+          <div
+            className="txn-edit-modal__panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="txn-edit-title" className="card__subtitle">
+              Edit transaction
+            </h3>
+            <div className="txn-edit-modal__form">
+              <label className="field-label">
+                Date
+                <input
+                  type="date"
+                  value={editForm.date}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, date: e.target.value }))
+                  }
+                  disabled={savingEdit}
+                />
+              </label>
+
+              <label className="field-label">
+                Type
+                <select
+                  value={editForm.type}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, type: e.target.value }))
+                  }
+                  disabled={savingEdit}
+                >
+                  <option value="expense">Expense</option>
+                  <option value="income">Income</option>
+                </select>
+              </label>
+
+              <label className="field-label">
+                Account
+                <select
+                  value={editForm.accountId}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      accountId: e.target.value,
+                    }))
+                  }
+                  disabled={savingEdit}
+                >
+                  <option value="" disabled>
+                    Select account
+                  </option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-label">
+                Category
+                <select
+                  value={editForm.category}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      category: e.target.value,
+                    }))
+                  }
+                  disabled={savingEdit || categoriesForEditType.length === 0}
+                >
+                  {categoriesForEditType.length === 0 ? (
+                    <option value="">No categories</option>
+                  ) : null}
+                  {categoriesForEditType.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field-label">
+                Amount
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={editForm.amount}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, amount: e.target.value }))
+                  }
+                  disabled={savingEdit}
+                />
+              </label>
+            </div>
+
+            <div className="txn-edit-modal__actions">
+              <button
+                type="button"
+                className="btn btn--subtle"
+                onClick={closeEditModal}
+                disabled={savingEdit}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={saveEdit}
+                disabled={savingEdit}
+              >
+                {savingEdit ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

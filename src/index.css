@@ -668,6 +668,43 @@ tr.data-row--selected:hover td {
   margin: 0.35rem 0 0;
 }
 
+.txn-edit-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in srgb, #000 50%, transparent);
+}
+
+.txn-edit-modal__panel {
+  width: min(100%, 30rem);
+  max-height: min(85vh, 42rem);
+  overflow: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 0 14px 38px rgba(18, 21, 28, 0.22);
+  padding: 1rem;
+}
+
+[data-theme="dark"] .txn-edit-modal__panel {
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.42);
+}
+
+.txn-edit-modal__form {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.txn-edit-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
 .account-actions-row {
   display: flex;
   flex-wrap: wrap;
