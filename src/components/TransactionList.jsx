@@ -29,7 +29,10 @@ export default function TransactionList({ user }) {
   const [savingEdit, setSavingEdit] = useState(false);
   const [selectedTransactionId, setSelectedTransactionId] = useState(null);
   const [editingTransactionId, setEditingTransactionId] = useState(null);
+  const [filterMonth, setFilterMonth] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
   const [editForm, setEditForm] = useState({
+    desc: "",
     date: "",
     type: "expense",
     accountId: "",
@@ -139,6 +142,7 @@ export default function TransactionList({ user }) {
   const startEditing = (t) => {
     setEditingTransactionId(t.id);
     setEditForm({
+      desc: t.desc != null && String(t.desc).trim() !== "" ? String(t.desc) : "",
       date: toDateInputValue(t.createdAt),
       type: t.type === "income" ? "income" : "expense",
       accountId: t.accountId ?? "",
@@ -179,6 +183,10 @@ export default function TransactionList({ user }) {
   const saveEdit = async () => {
     if (!editingTransaction || !user) return;
 
+    if (!editForm.desc?.trim()) {
+      alert("Enter a description.");
+      return;
+    }
     if (!editForm.date) {
       alert("Select a date.");
       return;
@@ -259,6 +267,7 @@ export default function TransactionList({ user }) {
       }
 
       batch.update(txnRef, {
+        desc: editForm.desc.trim(),
         type: newType,
         accountId: newAccountId,
         category: editForm.category,
@@ -281,20 +290,116 @@ export default function TransactionList({ user }) {
     accounts.map((a) => [a.id, a.name])
   );
 
-  const sortedForDisplay = [...transactions].sort(
-    (a, b) =>
-      transactionSortKey(b.createdAt) - transactionSortKey(a.createdAt)
+  const categoryFilterOptions = useMemo(() => {
+    const fromCats = categories.map((c) => String(c.name ?? "")).filter(Boolean);
+    const fromTxns = transactions
+      .map((t) => (t.category != null ? String(t.category) : ""))
+      .filter(Boolean);
+    const merged = [...new Set([...fromCats, ...fromTxns])];
+    merged.sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+    return merged;
+  }, [categories, transactions]);
+
+  const filteredTransactions = useMemo(() => {
+    let y;
+    let m;
+    if (filterMonth) {
+      const parts = filterMonth.split("-").map(Number);
+      y = parts[0];
+      m = parts[1];
+    }
+    return transactions.filter((t) => {
+      if (filterMonth) {
+        const d = transactionToDate(t.createdAt);
+        if (
+          !d ||
+          !Number.isFinite(y) ||
+          !Number.isFinite(m) ||
+          d.getFullYear() !== y ||
+          d.getMonth() !== m - 1
+        ) {
+          return false;
+        }
+      }
+      if (filterCategory && String(t.category ?? "") !== filterCategory) {
+        return false;
+      }
+      return true;
+    });
+  }, [transactions, filterMonth, filterCategory]);
+
+  const sortedForDisplay = useMemo(
+    () =>
+      [...filteredTransactions].sort(
+        (a, b) =>
+          transactionSortKey(b.createdAt) - transactionSortKey(a.createdAt)
+      ),
+    [filteredTransactions]
   );
+
+  const txnLabel = (t) => {
+    const hasDesc = t.desc != null && String(t.desc).trim() !== "";
+    return hasDesc ? String(t.desc).trim() : "—";
+  };
 
   return (
     <section className="card" aria-labelledby="txn-list-heading">
       <h2 id="txn-list-heading" className="card__title">
         Transactions
       </h2>
-      {sortedForDisplay.length === 0 ? (
+      {transactions.length === 0 ? (
         <p>No transactions yet.</p>
       ) : (
         <>
+          <div className="txn-list__filters">
+            <label className="field-label txn-list__filter">
+              <span className="txn-list__filter-label">Month</span>
+              <div className="txn-list__filter-controls">
+                <input
+                  type="month"
+                  value={filterMonth}
+                  onChange={(e) => setFilterMonth(e.target.value)}
+                  aria-label="Filter transactions by month"
+                />
+                {filterMonth ? (
+                  <button
+                    type="button"
+                    className="btn btn--subtle"
+                    onClick={() => setFilterMonth("")}
+                  >
+                    All months
+                  </button>
+                ) : null}
+              </div>
+            </label>
+            <label className="field-label txn-list__filter">
+              <span className="txn-list__filter-label">Category</span>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                aria-label="Filter transactions by category"
+              >
+                <option value="">All categories</option>
+                {categoryFilterOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {sortedForDisplay.length === 0 ? (
+            <p className="txn-list__empty-filters">
+              No transactions match these filters. Try a different month or
+              category, or clear the filters.
+            </p>
+          ) : null}
+
+          {sortedForDisplay.length > 0 ? (
+            <>
           <p className="hint-select-row show-mobile-only">
             Tap a transaction to show <strong>Edit</strong> and{" "}
             <strong>Remove</strong>.
@@ -325,6 +430,7 @@ export default function TransactionList({ user }) {
                   }
                 >
                   <div className="mobile-entity-list__main">
+                    <div className="txn-mobile__title">{txnLabel(t)}</div>
                     <div className="txn-mobile__row">
                       <span>{formatTransactionDate(t.createdAt)}</span>
                       <span className="txn-mobile__amount">{amountStr}</span>
@@ -367,6 +473,7 @@ export default function TransactionList({ user }) {
             <table>
               <thead>
                 <tr>
+                  <th>Description</th>
                   <th>Date</th>
                   <th>Type</th>
                   <th>Account</th>
@@ -395,6 +502,9 @@ export default function TransactionList({ user }) {
                         rowKeyToggle(e, () => toggleTransactionRow(t.id))
                       }
                     >
+                      <td className="txn-table__desc" title={txnLabel(t)}>
+                        {txnLabel(t)}
+                      </td>
                       <td>{formatTransactionDate(t.createdAt)}</td>
                       <td>{isIncome ? "Income" : "Expense"}</td>
                       <td>{accountNameById[t.accountId] ?? "—"}</td>
@@ -412,7 +522,7 @@ export default function TransactionList({ user }) {
                               }}
                               onClick={() => startEditing(t)}
                               disabled={busy || deletingId !== null}
-                              aria-label={`Edit transaction on ${formatTransactionDate(t.createdAt)}`}
+                              aria-label={`Edit “${txnLabel(t)}” · ${formatTransactionDate(t.createdAt)}`}
                             >
                               Edit
                             </button>
@@ -425,7 +535,7 @@ export default function TransactionList({ user }) {
                               }}
                               onClick={() => removeTransaction(t)}
                               disabled={busy || deletingId !== null}
-                              aria-label={`Remove transaction on ${formatTransactionDate(t.createdAt)}`}
+                              aria-label={`Remove “${txnLabel(t)}” · ${formatTransactionDate(t.createdAt)}`}
                             >
                               {busy ? "…" : "Remove"}
                             </button>
@@ -438,6 +548,8 @@ export default function TransactionList({ user }) {
               </tbody>
             </table>
           </div>
+            </>
+          ) : null}
         </>
       )}
       {editingTransaction ? (
@@ -456,6 +568,19 @@ export default function TransactionList({ user }) {
               Edit transaction
             </h3>
             <div className="txn-edit-modal__form">
+              <label className="field-label">
+                Description
+                <input
+                  type="text"
+                  value={editForm.desc}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({ ...prev, desc: e.target.value }))
+                  }
+                  disabled={savingEdit}
+                  autoComplete="off"
+                />
+              </label>
+
               <label className="field-label">
                 Date
                 <input
