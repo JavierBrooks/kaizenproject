@@ -8,6 +8,8 @@ import {
   doc,
   writeBatch,
   runTransaction,
+  updateDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { fetchUserTransactions } from "../utils/transactionHelpers";
 import {
@@ -36,6 +38,19 @@ export default function Accounts({ user }) {
   const [transferDestId, setTransferDestId] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
   const [transferSaving, setTransferSaving] = useState(false);
+  const [editingAccountId, setEditingAccountId] = useState(null);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [accountEditSaving, setAccountEditSaving] = useState(false);
+  const [categoryEditSaving, setCategoryEditSaving] = useState(false);
+  const [accountEditForm, setAccountEditForm] = useState({
+    name: "",
+    balance: "",
+  });
+  const [categoryEditForm, setCategoryEditForm] = useState({
+    name: "",
+    kind: "expense",
+    budget: "",
+  });
 
   const loadAccounts = async () => {
     const snapshot = await getDocs(
@@ -304,6 +319,142 @@ export default function Accounts({ user }) {
     }
   };
 
+  const startEditingAccount = (acc) => {
+    setEditingAccountId(acc.id);
+    setAccountEditForm({
+      name: String(acc.name ?? ""),
+      balance: String(Number(acc.balance) || 0),
+    });
+  };
+
+  const closeAccountEdit = () => {
+    if (accountEditSaving) return;
+    setEditingAccountId(null);
+  };
+
+  const startEditingCategory = (cat) => {
+    const isIncome = getCategoryKind(cat) === "income";
+    setEditingCategoryId(cat.id);
+    setCategoryEditForm({
+      name: String(cat.name ?? ""),
+      kind: isIncome ? "income" : "expense",
+      budget: isIncome ? "" : String(Number(cat.budget) || 0),
+    });
+  };
+
+  const closeCategoryEdit = () => {
+    if (categoryEditSaving) return;
+    setEditingCategoryId(null);
+  };
+
+  const saveAccountEdit = async () => {
+    const account = accounts.find((a) => a.id === editingAccountId);
+    if (!account) return;
+
+    const trimmedName = accountEditForm.name.trim();
+    if (!trimmedName) {
+      alert("Enter an account name.");
+      return;
+    }
+    const newBalance = parseFloat(accountEditForm.balance);
+    if (accountEditForm.balance === "" || Number.isNaN(newBalance)) {
+      alert("Enter a valid balance.");
+      return;
+    }
+
+    const oldBalance = Number(account.balance) || 0;
+    const delta = newBalance - oldBalance;
+
+    setAccountEditSaving(true);
+    try {
+      const userId = user.uid;
+      const accountRef = doc(db, "users", userId, "accounts", account.id);
+      await updateDoc(accountRef, { name: trimmedName, balance: newBalance });
+
+      if (Math.abs(delta) > 1e-9) {
+        await addDoc(collection(db, "users", userId, "transactions"), {
+          desc: "Balance adjustment",
+          amount: Math.abs(delta),
+          type: delta >= 0 ? "income" : "expense",
+          category: "Balance adjustment",
+          accountId: account.id,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      await loadAccounts();
+      await refreshCategoriesAndTx();
+      setEditingAccountId(null);
+    } catch (err) {
+      alert(err.message ?? "Could not update account.");
+    } finally {
+      setAccountEditSaving(false);
+    }
+  };
+
+  const saveCategoryEdit = async () => {
+    const category = categories.find((c) => c.id === editingCategoryId);
+    if (!category) return;
+
+    const trimmedName = categoryEditForm.name.trim();
+    if (!trimmedName) {
+      alert("Enter a category name.");
+      return;
+    }
+
+    const duplicate = categories.some(
+      (c) =>
+        c.id !== category.id &&
+        String(c.name ?? "").trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (duplicate) {
+      alert("A category with that name already exists.");
+      return;
+    }
+
+    const payload =
+      categoryEditForm.kind === "income"
+        ? { name: trimmedName, kind: "income" }
+        : (() => {
+            const b = parseFloat(categoryEditForm.budget);
+            if (categoryEditForm.budget === "" || Number.isNaN(b) || b < 0) {
+              alert("Enter a valid monthly budget (0 or more).");
+              return null;
+            }
+            return { name: trimmedName, kind: "expense", budget: b };
+          })();
+    if (!payload) return;
+
+    setCategoryEditSaving(true);
+    try {
+      const userId = user.uid;
+      await updateDoc(doc(db, "users", userId, "categories", category.id), payload);
+
+      const oldName = String(category.name ?? "");
+      if (oldName && oldName !== trimmedName) {
+        const tx = await fetchUserTransactions(db, userId);
+        const affected = tx.filter((t) => String(t.category ?? "") === oldName);
+        for (let i = 0; i < affected.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = affected.slice(i, i + 500);
+          for (const t of chunk) {
+            batch.update(doc(db, "users", userId, "transactions", t.id), {
+              category: trimmedName,
+            });
+          }
+          await batch.commit();
+        }
+      }
+
+      await refreshCategoriesAndTx();
+      setEditingCategoryId(null);
+    } catch (err) {
+      alert(err.message ?? "Could not update category.");
+    } finally {
+      setCategoryEditSaving(false);
+    }
+  };
+
   const renderTransferFields = (fromAcc) => {
     const otherAccounts = sortedAccounts.filter((a) => a.id !== fromAcc.id);
     if (otherAccounts.length === 0) {
@@ -415,11 +566,11 @@ export default function Accounts({ user }) {
         ) : (
           <>
             <p className="hint-select-row show-mobile-only">
-              Tap a row to show <strong>Remove</strong> and{" "}
+              Tap a row to show <strong>Edit</strong>, <strong>Remove</strong> and{" "}
               <strong>Transfer</strong>.
             </p>
             <p className="hint-select-row show-desktop-only">
-              Select a row for <strong>Remove</strong> or{" "}
+              Select a row for <strong>Edit</strong>, <strong>Remove</strong> or{" "}
               <strong>Transfer</strong> (click or keyboard).
             </p>
             <ul className="mobile-entity-list show-mobile-only">
@@ -462,6 +613,18 @@ export default function Accounts({ user }) {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="account-actions-row">
+                          <button
+                            type="button"
+                            className="btn btn--subtle"
+                            onClick={() => startEditingAccount(acc)}
+                            disabled={
+                              busy ||
+                              deletingAccountId !== null ||
+                              transferSaving
+                            }
+                          >
+                            Edit
+                          </button>
                           <button
                             type="button"
                             className="btn btn--danger"
@@ -539,6 +702,23 @@ export default function Accounts({ user }) {
                           <td onClick={(e) => e.stopPropagation()}>
                             {isSelected ? (
                               <div className="account-actions-row account-actions-row--compact">
+                                <button
+                                  type="button"
+                                  className="btn btn--subtle"
+                                  style={{
+                                    padding: "0.4rem 0.65rem",
+                                    fontSize: "0.82rem",
+                                  }}
+                                  onClick={() => startEditingAccount(acc)}
+                                  disabled={
+                                    busy ||
+                                    deletingAccountId !== null ||
+                                    transferSaving
+                                  }
+                                  aria-label={`Edit account ${acc.name ?? acc.id}`}
+                                >
+                                  Edit
+                                </button>
                                 <button
                                   type="button"
                                   className="btn btn--danger"
@@ -665,10 +845,10 @@ export default function Accounts({ user }) {
         ) : (
           <>
             <p className="hint-select-row show-mobile-only">
-              Tap a category to show <strong>Delete</strong>.
+              Tap a category to show <strong>Edit</strong> and <strong>Delete</strong>.
             </p>
             <p className="hint-select-row show-desktop-only">
-              Select a row to show <strong>Delete</strong>.
+              Select a row to show <strong>Edit</strong> and <strong>Delete</strong>.
             </p>
 
             <ul className="mobile-entity-list show-mobile-only">
@@ -751,6 +931,13 @@ export default function Accounts({ user }) {
                         className="mobile-entity-list__actions"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <button
+                          type="button"
+                          className="btn btn--subtle"
+                          onClick={() => startEditingCategory(cat)}
+                        >
+                          Edit category
+                        </button>
                         <button
                           type="button"
                           className="btn btn--danger"
@@ -845,17 +1032,30 @@ export default function Accounts({ user }) {
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           {isSelected ? (
-                            <button
-                              type="button"
-                              className="btn btn--danger"
-                              style={{
-                                padding: "0.4rem 0.65rem",
-                                fontSize: "0.82rem",
-                              }}
-                              onClick={() => removeCategory(cat)}
-                            >
-                              Delete
-                            </button>
+                            <div className="account-actions-row account-actions-row--compact">
+                              <button
+                                type="button"
+                                className="btn btn--subtle"
+                                style={{
+                                  padding: "0.4rem 0.65rem",
+                                  fontSize: "0.82rem",
+                                }}
+                                onClick={() => startEditingCategory(cat)}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--danger"
+                                style={{
+                                  padding: "0.4rem 0.65rem",
+                                  fontSize: "0.82rem",
+                                }}
+                                onClick={() => removeCategory(cat)}
+                              >
+                                Delete
+                              </button>
+                            </div>
                           ) : null}
                         </td>
                       </tr>
@@ -867,6 +1067,164 @@ export default function Accounts({ user }) {
           </>
         )}
       </section>
+      {editingAccountId ? (
+        <div
+          className="txn-edit-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="account-edit-title"
+          onClick={closeAccountEdit}
+        >
+          <div
+            className="txn-edit-modal__panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="account-edit-title" className="card__subtitle">
+              Edit account
+            </h3>
+            <div className="txn-edit-modal__form">
+              <label className="field-label">
+                Account name
+                <input
+                  type="text"
+                  value={accountEditForm.name}
+                  onChange={(e) =>
+                    setAccountEditForm((prev) => ({
+                      ...prev,
+                      name: e.target.value,
+                    }))
+                  }
+                  disabled={accountEditSaving}
+                />
+              </label>
+              <label className="field-label">
+                Balance
+                <input
+                  type="number"
+                  step="0.01"
+                  value={accountEditForm.balance}
+                  onChange={(e) =>
+                    setAccountEditForm((prev) => ({
+                      ...prev,
+                      balance: e.target.value,
+                    }))
+                  }
+                  disabled={accountEditSaving}
+                />
+              </label>
+            </div>
+            <p className="hint-select-row" style={{ marginTop: "0.6rem" }}>
+              Changing balance creates a <strong>Balance adjustment</strong>{" "}
+              transaction.
+            </p>
+            <div className="txn-edit-modal__actions">
+              <button
+                type="button"
+                className="btn btn--subtle"
+                onClick={closeAccountEdit}
+                disabled={accountEditSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={saveAccountEdit}
+                disabled={accountEditSaving}
+              >
+                {accountEditSaving ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editingCategoryId ? (
+        <div
+          className="txn-edit-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="category-edit-title"
+          onClick={closeCategoryEdit}
+        >
+          <div
+            className="txn-edit-modal__panel"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="category-edit-title" className="card__subtitle">
+              Edit category
+            </h3>
+            <div className="txn-edit-modal__form">
+              <label className="field-label">
+                Category name
+                <input
+                  type="text"
+                  value={categoryEditForm.name}
+                  onChange={(e) =>
+                    setCategoryEditForm((prev) => ({
+                      ...prev,
+                      name: e.target.value,
+                    }))
+                  }
+                  disabled={categoryEditSaving}
+                />
+              </label>
+              <label className="field-label">
+                Category type
+                <select
+                  value={categoryEditForm.kind}
+                  onChange={(e) =>
+                    setCategoryEditForm((prev) => ({
+                      ...prev,
+                      kind: e.target.value,
+                    }))
+                  }
+                  disabled={categoryEditSaving}
+                >
+                  <option value="expense">Expense (uses monthly budget)</option>
+                  <option value="income">Income (no budget)</option>
+                </select>
+              </label>
+              {categoryEditForm.kind === "expense" ? (
+                <label className="field-label">
+                  Monthly budget (max expenses)
+                  <input
+                    type="number"
+                    min={0}
+                    step="any"
+                    value={categoryEditForm.budget}
+                    onChange={(e) =>
+                      setCategoryEditForm((prev) => ({
+                        ...prev,
+                        budget: e.target.value,
+                      }))
+                    }
+                    disabled={categoryEditSaving}
+                  />
+                </label>
+              ) : null}
+            </div>
+            <div className="txn-edit-modal__actions">
+              <button
+                type="button"
+                className="btn btn--subtle"
+                onClick={closeCategoryEdit}
+                disabled={categoryEditSaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={saveCategoryEdit}
+                disabled={categoryEditSaving}
+              >
+                {categoryEditSaving ? "Saving…" : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
