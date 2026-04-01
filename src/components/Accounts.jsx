@@ -19,18 +19,26 @@ import {
   sumIncomeForCategoryInMonth,
   getCategoryKind,
 } from "../utils/categoryBudget";
+import {
+  convertAmount,
+  formatMoneyAmount,
+  normalizeCurrency,
+  SUPPORTED_CURRENCIES,
+} from "../utils/currency";
 
 export default function Accounts({ user }) {
   const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
+  const [accountCurrency, setAccountCurrency] = useState("USD");
   const [saving, setSaving] = useState(false);
 
   const [categories, setCategories] = useState([]);
   const [catName, setCatName] = useState("");
   const [catBudget, setCatBudget] = useState("");
   const [catKind, setCatKind] = useState("expense");
+  const [catCurrency, setCatCurrency] = useState("USD");
   const [catSaving, setCatSaving] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [deletingAccountId, setDeletingAccountId] = useState(null);
@@ -47,11 +55,13 @@ export default function Accounts({ user }) {
   const [accountEditForm, setAccountEditForm] = useState({
     name: "",
     balance: "",
+    currency: "USD",
   });
   const [categoryEditForm, setCategoryEditForm] = useState({
     name: "",
     kind: "expense",
     budget: "",
+    currency: "USD",
   });
 
   const loadAccounts = async () => {
@@ -93,10 +103,12 @@ export default function Accounts({ user }) {
       await addDoc(collection(db, "users", user.uid, "accounts"), {
         name: trimmed,
         balance: bal,
+        currency: normalizeCurrency(accountCurrency),
       });
       await loadAccounts();
       setName("");
       setBalance("");
+      setAccountCurrency("USD");
     } catch (err) {
       alert(err.message ?? "Could not add account.");
     } finally {
@@ -112,15 +124,16 @@ export default function Accounts({ user }) {
     }
 
     let payload;
+    const cur = normalizeCurrency(catCurrency);
     if (catKind === "income") {
-      payload = { name: trimmed, kind: "income" };
+      payload = { name: trimmed, kind: "income", currency: cur };
     } else {
       const bud = parseFloat(catBudget);
       if (catBudget === "" || Number.isNaN(bud) || bud < 0) {
         alert("Enter a valid monthly budget (0 or more).");
         return;
       }
-      payload = { name: trimmed, kind: "expense", budget: bud };
+      payload = { name: trimmed, kind: "expense", budget: bud, currency: cur };
     }
 
     const dup = categories.some(
@@ -137,6 +150,7 @@ export default function Accounts({ user }) {
       await refreshCategoriesAndTx();
       setCatName("");
       setCatBudget("");
+      setCatCurrency("USD");
     } catch (err) {
       alert(err.message ?? "Could not add category.");
     } finally {
@@ -298,8 +312,11 @@ export default function Accounts({ user }) {
         if (amt > fromBal + 1e-9) {
           throw new Error("Amount exceeds this account's balance.");
         }
+        const fromCur = normalizeCurrency(fromSnap.data().currency);
+        const toCur = normalizeCurrency(toSnap.data().currency);
+        const amtToCredit = convertAmount(amt, fromCur, toCur);
         transaction.update(fromRef, { balance: fromBal - amt });
-        transaction.update(toRef, { balance: toBal + amt });
+        transaction.update(toRef, { balance: toBal + amtToCredit });
       });
       await loadAccounts();
       resetTransferForm();
@@ -335,6 +352,7 @@ export default function Accounts({ user }) {
     setAccountEditForm({
       name: String(acc.name ?? ""),
       balance: String(Number(acc.balance) || 0),
+      currency: normalizeCurrency(acc.currency),
     });
   };
 
@@ -350,6 +368,7 @@ export default function Accounts({ user }) {
       name: String(cat.name ?? ""),
       kind: isIncome ? "income" : "expense",
       budget: isIncome ? "" : String(Number(cat.budget) || 0),
+      currency: normalizeCurrency(cat.currency),
     });
   };
 
@@ -380,12 +399,18 @@ export default function Accounts({ user }) {
     try {
       const userId = user.uid;
       const accountRef = doc(db, "users", userId, "accounts", account.id);
-      await updateDoc(accountRef, { name: trimmedName, balance: newBalance });
+      const accCur = normalizeCurrency(accountEditForm.currency);
+      await updateDoc(accountRef, {
+        name: trimmedName,
+        balance: newBalance,
+        currency: accCur,
+      });
 
       if (Math.abs(delta) > 1e-9) {
         await addDoc(collection(db, "users", userId, "transactions"), {
           desc: "Balance adjustment",
           amount: Math.abs(delta),
+          currency: accCur,
           type: delta >= 0 ? "income" : "expense",
           category: "Balance adjustment",
           accountId: account.id,
@@ -423,16 +448,17 @@ export default function Accounts({ user }) {
       return;
     }
 
+    const cur = normalizeCurrency(categoryEditForm.currency);
     const payload =
       categoryEditForm.kind === "income"
-        ? { name: trimmedName, kind: "income" }
+        ? { name: trimmedName, kind: "income", currency: cur }
         : (() => {
             const b = parseFloat(categoryEditForm.budget);
             if (categoryEditForm.budget === "" || Number.isNaN(b) || b < 0) {
               alert("Enter a valid monthly budget (0 or more).");
               return null;
             }
-            return { name: trimmedName, kind: "expense", budget: b };
+            return { name: trimmedName, kind: "expense", budget: b, currency: cur };
           })();
     if (!payload) return;
 
@@ -487,10 +513,10 @@ export default function Accounts({ user }) {
             {otherAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name} (
-                {new Intl.NumberFormat(undefined, {
-                  style: "currency",
-                  currency: "USD",
-                }).format(Number(a.balance) || 0)}
+                {formatMoneyAmount(
+                  a.balance,
+                  normalizeCurrency(a.currency)
+                )}
                 )
               </option>
             ))}
@@ -508,6 +534,11 @@ export default function Accounts({ user }) {
             aria-label="Transfer amount"
           />
         </label>
+        <p className="hint-select-row" style={{ marginTop: 2 }}>
+          Enter the amount in the <strong>source</strong> account&apos;s
+          currency. If the destination account uses another currency, it is
+          converted at the USD/XCD peg (2.7&nbsp;XCD per 1&nbsp;USD).
+        </p>
         <div className="account-transfer-actions">
           <button
             type="button"
@@ -536,7 +567,11 @@ export default function Accounts({ user }) {
         <h2 id="accounts-heading" className="card__title">
           Accounts
         </h2>
-        <p>Bank-style buckets that hold balances and receive transactions.</p>
+        <p>
+          Bank-style buckets that hold balances and receive transactions. Each
+          account has a currency (USD or XCD); balances are stored in that
+          currency.
+        </p>
 
         <h3 className="card__subtitle">Add account</h3>
         <div className="form-grid">
@@ -558,6 +593,20 @@ export default function Accounts({ user }) {
               onChange={(e) => setBalance(e.target.value)}
               aria-label="Starting balance"
             />
+          </label>
+          <label className="field-label">
+            Currency
+            <select
+              value={accountCurrency}
+              onChange={(e) => setAccountCurrency(e.target.value)}
+              aria-label="Account currency"
+            >
+              {SUPPORTED_CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
           </label>
           <div className="full-row">
             <button
@@ -586,13 +635,11 @@ export default function Accounts({ user }) {
             </p>
             <ul className="mobile-entity-list show-mobile-only">
               {sortedAccounts.map((acc) => {
+                const accCur = normalizeCurrency(acc.currency);
                 const bal = Number(acc.balance);
                 const balanceStr = Number.isNaN(bal)
                   ? "—"
-                  : new Intl.NumberFormat(undefined, {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(bal);
+                  : formatMoneyAmount(bal, accCur);
                 const busy = deletingAccountId === acc.id;
                 const isSelected = selectedAccountId === acc.id;
                 return (
@@ -616,6 +663,9 @@ export default function Accounts({ user }) {
                         <span className="accounts-mobile__bal">
                           {balanceStr}
                         </span>
+                      </div>
+                      <div className="accounts-mobile__meta">
+                        Currency · {accCur}
                       </div>
                     </div>
                     {isSelected && (
@@ -680,19 +730,18 @@ export default function Accounts({ user }) {
                 <thead>
                   <tr>
                     <th>Account</th>
+                    <th>Currency</th>
                     <th className="num">Balance</th>
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
                   {sortedAccounts.map((acc) => {
+                    const accCur = normalizeCurrency(acc.currency);
                     const bal = Number(acc.balance);
                     const balanceStr = Number.isNaN(bal)
                       ? "—"
-                      : new Intl.NumberFormat(undefined, {
-                          style: "currency",
-                          currency: "USD",
-                        }).format(bal);
+                      : formatMoneyAmount(bal, accCur);
                     const busy = deletingAccountId === acc.id;
                     const isSelected = selectedAccountId === acc.id;
                     return (
@@ -709,6 +758,7 @@ export default function Accounts({ user }) {
                           }
                         >
                           <td>{acc.name ?? "—"}</td>
+                          <td>{accCur}</td>
                           <td className="num">{balanceStr}</td>
                           <td onClick={(e) => e.stopPropagation()}>
                             {isSelected ? (
@@ -771,7 +821,7 @@ export default function Accounts({ user }) {
                         </tr>
                         {transferPanelForId === acc.id && (
                           <tr className="account-transfer-form-row">
-                            <td colSpan={3}>
+                            <td colSpan={4}>
                               <div
                                 className="account-transfer-panel account-transfer-panel--inline"
                                 onClick={(e) => e.stopPropagation()}
@@ -798,8 +848,9 @@ export default function Accounts({ user }) {
         <p>
           Add <strong>expense</strong> categories with a monthly spending cap,
           or <strong>income</strong> categories for tagging deposits (no budget,
-          not limited). Budget checks apply only to expenses in the current
-          calendar month.
+          not limited). Each category has a currency; budgets and monthly
+          totals are in that currency. Budget checks apply only to expenses in
+          the current calendar month.
         </p>
 
         <h3 className="card__subtitle">Add category</h3>
@@ -820,6 +871,20 @@ export default function Accounts({ user }) {
             >
               <option value="expense">Expense (uses monthly budget)</option>
               <option value="income">Income (no budget)</option>
+            </select>
+          </label>
+          <label className="field-label">
+            Currency
+            <select
+              value={catCurrency}
+              onChange={(e) => setCatCurrency(e.target.value)}
+              aria-label="Category currency"
+            >
+              {SUPPORTED_CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
           </label>
           {catKind === "expense" && (
@@ -865,44 +930,35 @@ export default function Accounts({ user }) {
             <ul className="mobile-entity-list show-mobile-only">
               {sortedCategories.map((cat) => {
                 const isIncome = getCategoryKind(cat) === "income";
+                const catCur = normalizeCurrency(cat.currency);
                 const budget = Number(cat.budget);
                 const budgetStr =
                   isIncome || !Number.isFinite(budget)
                     ? "—"
-                    : new Intl.NumberFormat(undefined, {
-                        style: "currency",
-                        currency: "USD",
-                      }).format(budget);
+                    : formatMoneyAmount(budget, catCur);
                 const monthTotal = isIncome
                   ? sumIncomeForCategoryInMonth(
                       transactions,
                       cat.name,
-                      now
+                      now,
+                      catCur
                     )
                   : sumExpenseForCategoryInMonth(
                       transactions,
                       cat.name,
-                      now
+                      now,
+                      catCur
                     );
-                const monthStr = new Intl.NumberFormat(undefined, {
-                  style: "currency",
-                  currency: "USD",
-                }).format(monthTotal);
+                const monthStr = formatMoneyAmount(monthTotal, catCur);
                 const left = !isIncome && Number.isFinite(budget)
                   ? budget - monthTotal
                   : NaN;
                 const leftStr = Number.isFinite(left)
-                  ? new Intl.NumberFormat(undefined, {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(Math.max(0, left))
+                  ? formatMoneyAmount(Math.max(0, left), catCur)
                   : "—";
                 const over = !isIncome && Number.isFinite(left) && left < 0;
                 const leftDisplay = over
-                  ? new Intl.NumberFormat(undefined, {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(left)
+                  ? formatMoneyAmount(left, catCur)
                   : leftStr;
                 const progressPct =
                   !isIncome && Number.isFinite(budget) && budget > 0
@@ -1017,37 +1073,31 @@ export default function Accounts({ user }) {
                 <tbody>
                   {sortedCategories.map((cat) => {
                     const isIncome = getCategoryKind(cat) === "income";
+                    const catCur = normalizeCurrency(cat.currency);
                     const budget = Number(cat.budget);
                     const budgetStr =
                       isIncome || !Number.isFinite(budget)
                         ? "—"
-                        : new Intl.NumberFormat(undefined, {
-                            style: "currency",
-                            currency: "USD",
-                          }).format(budget);
+                        : formatMoneyAmount(budget, catCur);
                     const monthTotal = isIncome
                       ? sumIncomeForCategoryInMonth(
                           transactions,
                           cat.name,
-                          now
+                          now,
+                          catCur
                         )
                       : sumExpenseForCategoryInMonth(
                           transactions,
                           cat.name,
-                          now
+                          now,
+                          catCur
                         );
-                    const monthStr = new Intl.NumberFormat(undefined, {
-                      style: "currency",
-                      currency: "USD",
-                    }).format(monthTotal);
+                    const monthStr = formatMoneyAmount(monthTotal, catCur);
                     const left = !isIncome && Number.isFinite(budget)
                       ? budget - monthTotal
                       : NaN;
                     const leftStr = Number.isFinite(left)
-                      ? new Intl.NumberFormat(undefined, {
-                          style: "currency",
-                          currency: "USD",
-                        }).format(Math.max(0, left))
+                      ? formatMoneyAmount(Math.max(0, left), catCur)
                       : "—";
                     const over = !isIncome && Number.isFinite(left) && left < 0;
                     const progressPct =
@@ -1078,10 +1128,7 @@ export default function Accounts({ user }) {
                           {isIncome
                             ? "—"
                             : over
-                              ? new Intl.NumberFormat(undefined, {
-                                  style: "currency",
-                                  currency: "USD",
-                                }).format(left)
+                              ? formatMoneyAmount(left, catCur)
                               : leftStr}
                         </td>
                         <td>
@@ -1207,10 +1254,30 @@ export default function Accounts({ user }) {
                   disabled={accountEditSaving}
                 />
               </label>
+              <label className="field-label">
+                Currency
+                <select
+                  value={accountEditForm.currency}
+                  onChange={(e) =>
+                    setAccountEditForm((prev) => ({
+                      ...prev,
+                      currency: e.target.value,
+                    }))
+                  }
+                  disabled={accountEditSaving}
+                >
+                  {SUPPORTED_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
             <p className="hint-select-row" style={{ marginTop: "0.6rem" }}>
-              Changing balance creates a <strong>Balance adjustment</strong>{" "}
-              transaction.
+              Balance is stored in the account currency. Changing balance
+              creates a <strong>Balance adjustment</strong> transaction in that
+              currency.
             </p>
             <div className="txn-edit-modal__actions">
               <button
@@ -1278,6 +1345,25 @@ export default function Accounts({ user }) {
                 >
                   <option value="expense">Expense (uses monthly budget)</option>
                   <option value="income">Income (no budget)</option>
+                </select>
+              </label>
+              <label className="field-label">
+                Currency
+                <select
+                  value={categoryEditForm.currency}
+                  onChange={(e) =>
+                    setCategoryEditForm((prev) => ({
+                      ...prev,
+                      currency: e.target.value,
+                    }))
+                  }
+                  disabled={categoryEditSaving}
+                >
+                  {SUPPORTED_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
                 </select>
               </label>
               {categoryEditForm.kind === "expense" ? (

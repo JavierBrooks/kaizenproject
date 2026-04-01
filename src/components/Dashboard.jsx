@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
 import { fetchUserTransactions } from "../utils/transactionHelpers";
+import { convertAmount, normalizeCurrency } from "../utils/currency";
 
 export default function Dashboard({ user }) {
   const [transactions, setTransactions] = useState([]);
@@ -23,9 +24,9 @@ export default function Dashboard({ user }) {
   }, [user]);
 
   const total = transactions.reduce((acc, t) => {
-    return t.type === "income"
-      ? acc + Number(t.amount)
-      : acc - Number(t.amount);
+    const txCur = normalizeCurrency(t.currency);
+    const usd = convertAmount(Number(t.amount), txCur, "USD");
+    return t.type === "income" ? acc + usd : acc - usd;
   }, 0);
 
   const formatted = new Intl.NumberFormat(undefined, {
@@ -49,7 +50,10 @@ export default function Dashboard({ user }) {
       <h2 id="summary-heading" className="card__title">
         Net cash flow
       </h2>
-      <p>Income minus expenses across all recorded transactions.</p>
+      <p>
+        Income minus expenses across all recorded transactions, shown in{" "}
+        <strong>USD</strong> (amounts in other currencies are converted at the USD/XCD peg).
+      </p>
       <div className="summary-stat">
         <span className="summary-stat__label">Balance trend</span>
         <span

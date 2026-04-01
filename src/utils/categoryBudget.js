@@ -1,4 +1,5 @@
 import { collection, getDocs } from "firebase/firestore";
+import { convertAmount, formatMoneyAmount, normalizeCurrency } from "./currency";
 
 export function transactionToDate(createdAt) {
   if (!createdAt) return null;
@@ -17,20 +18,24 @@ export function getCategoryKind(cat) {
 export function sumIncomeForCategoryInMonth(
   transactions,
   categoryName,
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  categoryCurrency = "USD"
 ) {
   const y = referenceDate.getFullYear();
   const m = referenceDate.getMonth();
   const start = new Date(y, m, 1, 0, 0, 0, 0);
   const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
 
+  const target = normalizeCurrency(categoryCurrency);
   let sum = 0;
   for (const t of transactions) {
     if (t.type !== "income") continue;
     if (String(t.category) !== String(categoryName)) continue;
     const d = transactionToDate(t.createdAt);
     if (!d || d < start || d > end) continue;
-    sum += Number(t.amount);
+    const txCur = normalizeCurrency(t.currency);
+    const amt = convertAmount(Number(t.amount), txCur, target);
+    sum += amt;
   }
   return sum;
 }
@@ -39,20 +44,24 @@ export function sumIncomeForCategoryInMonth(
 export function sumExpenseForCategoryInMonth(
   transactions,
   categoryName,
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  categoryCurrency = "USD"
 ) {
   const y = referenceDate.getFullYear();
   const m = referenceDate.getMonth();
   const start = new Date(y, m, 1, 0, 0, 0, 0);
   const end = new Date(y, m + 1, 0, 23, 59, 59, 999);
 
+  const target = normalizeCurrency(categoryCurrency);
   let sum = 0;
   for (const t of transactions) {
     if (t.type !== "expense") continue;
     if (String(t.category) !== String(categoryName)) continue;
     const d = transactionToDate(t.createdAt);
     if (!d || d < start || d > end) continue;
-    sum += Number(t.amount);
+    const txCur = normalizeCurrency(t.currency);
+    const amt = convertAmount(Number(t.amount), txCur, target);
+    sum += amt;
   }
   return sum;
 }
@@ -75,7 +84,8 @@ export function evaluateExpenseAgainstBudget(
   categoryName,
   monthlyBudget,
   additionalExpenseAmount,
-  referenceDate = new Date()
+  referenceDate = new Date(),
+  categoryCurrency = "USD"
 ) {
   const budget = Number(monthlyBudget);
   if (!Number.isFinite(budget) || budget < 0) {
@@ -87,20 +97,18 @@ export function evaluateExpenseAgainstBudget(
     };
   }
 
+  const catCur = normalizeCurrency(categoryCurrency);
   const spent = sumExpenseForCategoryInMonth(
     transactions,
     categoryName,
-    referenceDate
+    referenceDate,
+    catCur
   );
   const after = spent + additionalExpenseAmount;
   const remaining = Math.max(0, budget - spent);
 
   if (after > budget + 1e-9) {
-    const fmt = (n) =>
-      new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
-      }).format(n);
+    const fmt = (n) => formatMoneyAmount(n, catCur);
     return {
       blocked: true,
       spent,

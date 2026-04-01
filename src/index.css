@@ -624,6 +624,12 @@ tr.data-row--selected:hover td {
   flex-shrink: 0;
 }
 
+.accounts-mobile__meta {
+  margin-top: 0.3rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
 .cat-mobile__stats {
   display: grid;
   grid-template-columns: auto 1fr;
@@ -711,6 +717,29 @@ tr.data-row--selected:hover td {
   margin-left: auto;
   font-variant-numeric: tabular-nums;
   font-weight: 650;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.15rem;
+  text-align: right;
+  max-width: 58%;
+}
+
+.txn-mobile__amount-main {
+  line-height: 1.2;
+}
+
+.txn-conv-hint {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  line-height: 1.2;
+}
+
+.txn-table__amount-cell {
+  vertical-align: top;
+  white-space: nowrap;
 }
 
 .txn-mobile__meta {

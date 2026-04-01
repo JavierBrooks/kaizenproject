@@ -13,7 +13,6 @@ import {
 import {
   formatTransactionDate,
   transactionSortKey,
-  money,
   fetchUserTransactions,
 } from "../utils/transactionHelpers";
 import {
@@ -21,6 +20,13 @@ import {
   getCategoryKind,
   transactionToDate,
 } from "../utils/categoryBudget";
+import {
+  convertAmount,
+  formatMoneyAmount,
+  normalizeCurrency,
+  conversionHints,
+  SUPPORTED_CURRENCIES,
+} from "../utils/currency";
 
 export default function TransactionList({ user }) {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -40,6 +46,7 @@ export default function TransactionList({ user }) {
     accountId: "",
     category: "",
     amount: "",
+    currency: "USD",
   });
 
   const loadAccounts = async () => {
@@ -136,7 +143,10 @@ export default function TransactionList({ user }) {
         const accountSnap = await getDoc(accountRef);
         if (accountSnap.exists) {
           const currentBalance = accountSnap.data().balance || 0;
-          const delta = t.type === "income" ? -amountNum : amountNum;
+          const accCur = normalizeCurrency(accountSnap.data().currency);
+          const txCur = normalizeCurrency(t.currency);
+          const amountInAcc = convertAmount(amountNum, txCur, accCur);
+          const delta = t.type === "income" ? -amountInAcc : amountInAcc;
           const batch = writeBatch(db);
           batch.update(accountRef, { balance: currentBalance + delta });
           batch.delete(txnRef);
@@ -173,6 +183,7 @@ export default function TransactionList({ user }) {
       accountId: t.accountId ?? "",
       category: t.category ? String(t.category) : "",
       amount: String(Number(t.amount) || 0),
+      currency: normalizeCurrency(t.currency),
     });
   };
 
@@ -255,6 +266,20 @@ export default function TransactionList({ user }) {
     const newAccountId = editForm.accountId;
     const oldType = editingTransaction.type === "income" ? "income" : "expense";
     const newType = editForm.type === "income" ? "income" : "expense";
+    const oldTxnCur = normalizeCurrency(editingTransaction.currency);
+    const newTxnCur = normalizeCurrency(editForm.currency);
+
+    const accountFor = (id) => accounts.find((a) => a.id === id);
+    const oldAcc = oldAccountId ? accountFor(oldAccountId) : null;
+    const newAcc = newAccountId ? accountFor(newAccountId) : null;
+    const oldAccCur = oldAcc
+      ? normalizeCurrency(oldAcc.currency)
+      : oldTxnCur;
+    const newAccCur = newAcc
+      ? normalizeCurrency(newAcc.currency)
+      : newTxnCur;
+    const oldAmountAcc = convertAmount(oldAmount, oldTxnCur, oldAccCur);
+    const newAmountAcc = convertAmount(parsedAmount, newTxnCur, newAccCur);
 
     setSavingEdit(true);
     try {
@@ -266,12 +291,12 @@ export default function TransactionList({ user }) {
       if (oldAccountId) {
         accountDeltas[oldAccountId] =
           (accountDeltas[oldAccountId] ?? 0) +
-          (oldType === "income" ? -oldAmount : oldAmount);
+          (oldType === "income" ? -oldAmountAcc : oldAmountAcc);
       }
       if (newAccountId) {
         accountDeltas[newAccountId] =
           (accountDeltas[newAccountId] ?? 0) +
-          (newType === "income" ? parsedAmount : -parsedAmount);
+          (newType === "income" ? newAmountAcc : -newAmountAcc);
       }
 
       const touchedAccountIds = Object.keys(accountDeltas).filter(
@@ -297,6 +322,7 @@ export default function TransactionList({ user }) {
         accountId: newAccountId,
         category: editForm.category,
         amount: parsedAmount,
+        currency: newTxnCur,
         createdAt: Timestamp.fromDate(parsedDate),
       });
 
@@ -314,6 +340,19 @@ export default function TransactionList({ user }) {
   const accountNameById = Object.fromEntries(
     accounts.map((a) => [a.id, a.name])
   );
+
+  const accountById = useMemo(
+    () => Object.fromEntries(accounts.map((a) => [a.id, a])),
+    [accounts]
+  );
+
+  const categoryByName = useMemo(() => {
+    const o = {};
+    for (const c of categories) {
+      o[c.name] = c;
+    }
+    return o;
+  }, [categories]);
 
   const categoryFilterOptions = useMemo(() => {
     const fromCats = categories.map((c) => String(c.name ?? "")).filter(Boolean);
@@ -438,7 +477,13 @@ export default function TransactionList({ user }) {
             {sortedForDisplay.map((t) => {
               const isIncome = t.type === "income";
               const amountNum = Number(t.amount);
-              const amountStr = `${isIncome ? "+" : "−"}${money(amountNum)}`;
+              const txCur = normalizeCurrency(t.currency);
+              const amountMain = `${isIncome ? "+" : "−"}${formatMoneyAmount(amountNum, txCur)}`;
+              const convHints = conversionHints(
+                t,
+                accountById[t.accountId],
+                categoryByName[t.category]
+              );
               const busy = deletingId === t.id;
               const isSelected = selectedTransactionId === t.id;
               return (
@@ -458,7 +503,16 @@ export default function TransactionList({ user }) {
                     <div className="txn-mobile__title">{txnLabel(t)}</div>
                     <div className="txn-mobile__row">
                       <span>{formatTransactionDate(t.createdAt)}</span>
-                      <span className="txn-mobile__amount">{amountStr}</span>
+                      <span className="txn-mobile__amount">
+                        <span className="txn-mobile__amount-main">
+                          {amountMain}
+                        </span>
+                        {convHints.map((h) => (
+                          <span className="txn-conv-hint" key={h}>
+                            {h}
+                          </span>
+                        ))}
+                      </span>
                     </div>
                     <div className="txn-mobile__meta">
                       {isIncome ? "Income" : "Expense"} ·{" "}
@@ -511,7 +565,13 @@ export default function TransactionList({ user }) {
                 {sortedForDisplay.map((t) => {
                   const isIncome = t.type === "income";
                   const amountNum = Number(t.amount);
-                  const amountStr = `${isIncome ? "+" : "−"}${money(amountNum)}`;
+                  const txCur = normalizeCurrency(t.currency);
+                  const amountMain = `${isIncome ? "+" : "−"}${formatMoneyAmount(amountNum, txCur)}`;
+                  const convHints = conversionHints(
+                    t,
+                    accountById[t.accountId],
+                    categoryByName[t.category]
+                  );
                   const busy = deletingId === t.id;
                   const isSelected = selectedTransactionId === t.id;
                   return (
@@ -534,7 +594,14 @@ export default function TransactionList({ user }) {
                       <td>{isIncome ? "Income" : "Expense"}</td>
                       <td>{accountNameById[t.accountId] ?? "—"}</td>
                       <td>{t.category ? String(t.category) : "—"}</td>
-                      <td className="num">{amountStr}</td>
+                      <td className="num txn-table__amount-cell">
+                        <div>{amountMain}</div>
+                        {convHints.map((h) => (
+                          <div className="txn-conv-hint" key={h}>
+                            {h}
+                          </div>
+                        ))}
+                      </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         {isSelected ? (
                           <div className="account-actions-row account-actions-row--compact">
@@ -691,6 +758,26 @@ export default function TransactionList({ user }) {
                   }
                   disabled={savingEdit}
                 />
+              </label>
+
+              <label className="field-label">
+                Currency
+                <select
+                  value={editForm.currency}
+                  onChange={(e) =>
+                    setEditForm((prev) => ({
+                      ...prev,
+                      currency: e.target.value,
+                    }))
+                  }
+                  disabled={savingEdit}
+                >
+                  {SUPPORTED_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
               </label>
             </div>
 

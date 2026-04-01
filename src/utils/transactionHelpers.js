@@ -4,6 +4,7 @@ import {
   query,
   orderBy,
 } from "firebase/firestore";
+import { formatMoneyAmount } from "./currency";
 
 export function formatTransactionDate(createdAt) {
   if (!createdAt) return "—";
@@ -27,11 +28,9 @@ export function transactionSortKey(createdAt) {
   return Number.isNaN(t) ? 0 : t;
 }
 
+/** Format a number as USD (legacy default; transactions may use other currencies). */
 export function money(n) {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-  }).format(Math.abs(Number(n)));
+  return formatMoneyAmount(n, "USD");
 }
 
 export async function fetchUserTransactions(db, userId) {

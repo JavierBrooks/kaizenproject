@@ -10,12 +10,18 @@ import {
   getDoc,
   serverTimestamp,
 } from "firebase/firestore";
-import { money, fetchUserTransactions } from "../utils/transactionHelpers";
+import { fetchUserTransactions } from "../utils/transactionHelpers";
 import {
   fetchUserCategories,
   evaluateExpenseAgainstBudget,
   getCategoryKind,
 } from "../utils/categoryBudget";
+import {
+  convertAmount,
+  formatMoneyAmount,
+  normalizeCurrency,
+  SUPPORTED_CURRENCIES,
+} from "../utils/currency";
 
 export default function AddTransaction({ user }) {
   const navigate = useNavigate();
@@ -26,6 +32,7 @@ export default function AddTransaction({ user }) {
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
+  const [txnCurrency, setTxnCurrency] = useState("USD");
 
   const loadAccounts = async () => {
     const snapshot = await getDocs(
@@ -72,6 +79,13 @@ export default function AddTransaction({ user }) {
     });
   }, [categoriesForType]);
 
+  useEffect(() => {
+    const catMeta = categories.find((c) => c.name === category);
+    if (catMeta?.currency) {
+      setTxnCurrency(normalizeCurrency(catMeta.currency));
+    }
+  }, [category, categories]);
+
   const addTransaction = async () => {
     if (!desc || !amount) return alert("Fill all fields");
     if (!selectedAccount) return alert("Select account");
@@ -93,6 +107,10 @@ export default function AddTransaction({ user }) {
       return;
     }
 
+    const txCur = normalizeCurrency(txnCurrency);
+    const accMeta = accounts.find((a) => a.id === selectedAccount);
+    const accCur = normalizeCurrency(accMeta?.currency);
+
     if (type === "expense") {
       const catMeta = categories.find((c) => c.name === category);
       if (!catMeta || getCategoryKind(catMeta) !== "expense") {
@@ -100,14 +118,17 @@ export default function AddTransaction({ user }) {
         return;
       }
       const budgetVal = catMeta ? Number(catMeta.budget) : NaN;
+      const catCur = normalizeCurrency(catMeta?.currency);
+      const amountInCategory = convertAmount(parsedAmount, txCur, catCur);
       if (Number.isFinite(budgetVal) && budgetVal >= 0) {
         const txns = await fetchUserTransactions(db, userId);
         const { blocked, message } = evaluateExpenseAgainstBudget(
           txns,
           category,
           budgetVal,
-          parsedAmount,
-          new Date()
+          amountInCategory,
+          new Date(),
+          catCur
         );
         if (blocked) {
           alert(message);
@@ -116,9 +137,12 @@ export default function AddTransaction({ user }) {
       }
     }
 
+    const amountInAccount = convertAmount(parsedAmount, txCur, accCur);
+
     await addDoc(collection(db, "users", userId, "transactions"), {
       desc,
       amount: parsedAmount,
+      currency: txCur,
       type,
       category,
       accountId: selectedAccount,
@@ -132,8 +156,8 @@ export default function AddTransaction({ user }) {
 
     const newBalance =
       type === "income"
-        ? currentBalance + parsedAmount
-        : currentBalance - parsedAmount;
+        ? currentBalance + amountInAccount
+        : currentBalance - amountInAccount;
 
     await updateDoc(accountRef, { balance: newBalance });
 
@@ -142,6 +166,7 @@ export default function AddTransaction({ user }) {
     setDesc("");
     setAmount("");
     setSelectedAccount("");
+    setTxnCurrency("USD");
     navigate("/transactions");
   };
 
@@ -150,7 +175,13 @@ export default function AddTransaction({ user }) {
       <h2 id="add-txn-heading" className="card__title">
         Add transaction
       </h2>
-      <p>Record income or debits against one of your accounts.</p>
+      <p>
+        Record income or debits against one of your accounts. Amounts are
+        stored in the currency you pick; the account balance updates using that
+        currency. Budget checks use the category&apos;s currency. Conversions
+        between USD and XCD use the standard 2.7&nbsp;XCD per 1&nbsp;USD peg.
+        Older transactions without a currency are treated as USD.
+      </p>
 
       {categories.length === 0 ? (
         <p>
@@ -186,6 +217,20 @@ export default function AddTransaction({ user }) {
             />
           </label>
           <label className="field-label">
+            Currency
+            <select
+              value={txnCurrency}
+              onChange={(e) => setTxnCurrency(e.target.value)}
+              aria-label="Transaction currency"
+            >
+              {SUPPORTED_CURRENCIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
             Account
             <select
               value={selectedAccount}
@@ -194,7 +239,12 @@ export default function AddTransaction({ user }) {
               <option value="">Select account</option>
               {accounts.map((acc) => (
                 <option key={acc.id} value={acc.id}>
-                  {acc.name} ({money(acc.balance)})
+                  {acc.name} (
+                  {formatMoneyAmount(
+                    acc.balance,
+                    normalizeCurrency(acc.currency)
+                  )}
+                  )
                 </option>
               ))}
             </select>
