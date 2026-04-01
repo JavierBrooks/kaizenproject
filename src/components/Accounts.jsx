@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from "react";
+import { useNavigate } from "react-router-dom";
 import { db } from "../firebase";
 import {
   collection,
@@ -20,6 +21,7 @@ import {
 } from "../utils/categoryBudget";
 
 export default function Accounts({ user }) {
+  const navigate = useNavigate();
   const [accounts, setAccounts] = useState([]);
   const [name, setName] = useState("");
   const [balance, setBalance] = useState("");
@@ -317,6 +319,15 @@ export default function Accounts({ user }) {
       e.preventDefault();
       onToggle();
     }
+  };
+
+  const viewCategoryTransactions = (categoryName) => {
+    const params = new URLSearchParams();
+    params.set("category", String(categoryName ?? ""));
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    params.set("month", `${y}-${m}`);
+    navigate(`/transactions?${params.toString()}`);
   };
 
   const startEditingAccount = (acc) => {
@@ -893,6 +904,10 @@ export default function Accounts({ user }) {
                       currency: "USD",
                     }).format(left)
                   : leftStr;
+                const progressPct =
+                  !isIncome && Number.isFinite(budget) && budget > 0
+                    ? Math.min(100, Math.max(0, (monthTotal / budget) * 100))
+                    : 0;
                 const isSelected = selectedCategoryId === cat.id;
                 return (
                   <li
@@ -925,12 +940,46 @@ export default function Accounts({ user }) {
                           {isIncome ? "—" : leftDisplay}
                         </dd>
                       </dl>
+                      {!isIncome && Number.isFinite(budget) ? (
+                        <div className="budget-progress">
+                          <div className="budget-progress__row">
+                            <span>Budget usage</span>
+                            <strong>{progressPct.toFixed(0)}%</strong>
+                          </div>
+                          <div
+                            className={
+                              "budget-progress__track" +
+                              (over ? " budget-progress__track--over" : "")
+                            }
+                            role="progressbar"
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={Math.min(100, progressPct)}
+                            aria-label={`Budget usage for ${cat.name}`}
+                          >
+                            <div
+                              className={
+                                "budget-progress__fill" +
+                                (over ? " budget-progress__fill--over" : "")
+                              }
+                              style={{ width: `${progressPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      ) : null}
                     </div>
                     {isSelected && (
                       <div
                         className="mobile-entity-list__actions"
                         onClick={(e) => e.stopPropagation()}
                       >
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          onClick={() => viewCategoryTransactions(cat.name)}
+                        >
+                          View transactions
+                        </button>
                         <button
                           type="button"
                           className="btn btn--subtle"
@@ -961,6 +1010,7 @@ export default function Accounts({ user }) {
                     <th className="num">Monthly budget</th>
                     <th className="num">This month</th>
                     <th className="num">Left</th>
+                    <th>Usage</th>
                     <th aria-label="Actions" />
                   </tr>
                 </thead>
@@ -1000,6 +1050,10 @@ export default function Accounts({ user }) {
                         }).format(Math.max(0, left))
                       : "—";
                     const over = !isIncome && Number.isFinite(left) && left < 0;
+                    const progressPct =
+                      !isIncome && Number.isFinite(budget) && budget > 0
+                        ? Math.min(100, Math.max(0, (monthTotal / budget) * 100))
+                        : 0;
                     const isSelected = selectedCategoryId === cat.id;
                     return (
                       <tr
@@ -1030,9 +1084,50 @@ export default function Accounts({ user }) {
                                 }).format(left)
                               : leftStr}
                         </td>
+                        <td>
+                          {!isIncome && Number.isFinite(budget) ? (
+                            <div className="budget-progress budget-progress--compact">
+                              <div
+                                className={
+                                  "budget-progress__track" +
+                                  (over ? " budget-progress__track--over" : "")
+                                }
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={Math.min(100, progressPct)}
+                                aria-label={`Budget usage for ${cat.name}`}
+                              >
+                                <div
+                                  className={
+                                    "budget-progress__fill" +
+                                    (over ? " budget-progress__fill--over" : "")
+                                  }
+                                  style={{ width: `${progressPct}%` }}
+                                />
+                              </div>
+                              <span className="budget-progress__compact-label">
+                                {progressPct.toFixed(0)}%
+                              </span>
+                            </div>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td onClick={(e) => e.stopPropagation()}>
                           {isSelected ? (
                             <div className="account-actions-row account-actions-row--compact">
+                              <button
+                                type="button"
+                                className="btn btn--secondary"
+                                style={{
+                                  padding: "0.4rem 0.65rem",
+                                  fontSize: "0.82rem",
+                                }}
+                                onClick={() => viewCategoryTransactions(cat.name)}
+                              >
+                                View
+                              </button>
                               <button
                                 type="button"
                                 className="btn btn--subtle"

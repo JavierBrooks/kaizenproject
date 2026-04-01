@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import { db } from "../firebase";
 import {
   collection,
@@ -22,6 +23,7 @@ import {
 } from "../utils/categoryBudget";
 
 export default function TransactionList({ user }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [transactions, setTransactions] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
@@ -74,6 +76,29 @@ export default function TransactionList({ user }) {
     loadTransactions();
     loadCategories();
   }, [user]);
+
+  useEffect(() => {
+    const qpCategory = searchParams.get("category") ?? "";
+    const qpMonth = searchParams.get("month") ?? "";
+    setFilterCategory(qpCategory);
+    setFilterMonth(qpMonth);
+  }, [searchParams]);
+
+  const setCategoryFilter = (value) => {
+    setFilterCategory(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("category", value);
+    else next.delete("category");
+    setSearchParams(next, { replace: true });
+  };
+
+  const setMonthFilter = (value) => {
+    setFilterMonth(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("month", value);
+    else next.delete("month");
+    setSearchParams(next, { replace: true });
+  };
 
   const toggleTransactionRow = (id) => {
     setSelectedTransactionId((s) => (s === id ? null : id));
@@ -360,14 +385,14 @@ export default function TransactionList({ user }) {
                 <input
                   type="month"
                   value={filterMonth}
-                  onChange={(e) => setFilterMonth(e.target.value)}
+                  onChange={(e) => setMonthFilter(e.target.value)}
                   aria-label="Filter transactions by month"
                 />
                 {filterMonth ? (
                   <button
                     type="button"
                     className="btn btn--subtle"
-                    onClick={() => setFilterMonth("")}
+                    onClick={() => setMonthFilter("")}
                   >
                     All months
                   </button>
@@ -378,7 +403,7 @@ export default function TransactionList({ user }) {
               <span className="txn-list__filter-label">Category</span>
               <select
                 value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
+                onChange={(e) => setCategoryFilter(e.target.value)}
                 aria-label="Filter transactions by category"
               >
                 <option value="">All categories</option>
