@@ -22,43 +22,59 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    /** Accounts: name + balance */
+    /** Optional ISO currency on accounts/categories/transactions (app: USD, XCD). */
+    function optionalCurrencyOk() {
+      let d = request.resource.data;
+      return !d.keys().hasAny(['currency'])
+        || (d.currency is string && d.currency in ['USD', 'XCD']);
+    }
+
+    /** Accounts: name + balance; optional currency */
     function validAccountWrite() {
       let d = request.resource.data;
       return d.keys().hasAll(['name', 'balance'])
         && d.name is string
         && d.name.size() > 0
         && d.name.size() < 200
-        && d.balance is number;
+        && d.balance is number
+        && optionalCurrencyOk();
     }
 
     /**
-     * Categories (single return — Firestore rules do not allow if/else in functions):
-     *   income  -> { name, kind: "income" }
-     *   expense -> { name, budget } or { name, budget, kind: "expense" }
+     * Categories:
+     *   income  -> { name, kind: "income" } [+ optional currency]
+     *   expense -> { name, budget } or { name, budget, kind: "expense" } [+ optional currency]
      */
     function validCategoryWrite() {
       let d = request.resource.data;
       return (d.name is string && d.name.size() > 0 && d.name.size() < 200)
+        && optionalCurrencyOk()
         && (
-          (d.keys().hasOnly(['name', 'kind']) && d.kind == 'income')
+          (d.kind == 'income'
+            && d.keys().hasAll(['name', 'kind'])
+            && d.keys().hasOnly(['name', 'kind', 'currency']))
           || (
             d.keys().hasAll(['budget'])
             && (d.budget is number)
             && d.budget >= 0
             && (
-              d.keys().hasOnly(['name', 'budget'])
+              (d.keys().hasOnly(['name', 'budget'])
+                || d.keys().hasOnly(['name', 'budget', 'currency']))
               || (
-                d.keys().hasOnly(['name', 'budget', 'kind'])
-                && d.kind == 'expense'
+                d.kind == 'expense'
+                && d.keys().hasAll(['name', 'budget', 'kind'])
+                && (
+                  d.keys().hasOnly(['name', 'budget', 'kind'])
+                  || d.keys().hasOnly(['name', 'budget', 'kind', 'currency'])
+                )
               )
             )
           )
         );
     }
 
-    /** Transactions created / read by the app */
-    function validTransactionWrite() {
+    /** Full transaction document shape (create + update merge result). */
+    function validTransactionDocument() {
       let d = request.resource.data;
       return d.keys().hasAll([
           'desc',
@@ -79,7 +95,8 @@ service cloud.firestore {
         && d.category.size() < 200
         && d.accountId is string
         && d.accountId.size() > 0
-        && d.createdAt is timestamp;
+        && d.createdAt is timestamp
+        && optionalCurrencyOk();
     }
 
     /* No direct access to the user root document (subcollections still work). */
@@ -103,9 +120,9 @@ service cloud.firestore {
 
     match /users/{userId}/transactions/{transactionId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && validTransactionWrite();
-      /* Current app only creates and deletes transactions, not updates. */
-      allow update: if false;
+      allow create: if isOwner(userId) && validTransactionDocument();
+      /* Edits in TransactionList; category renames batch-update category only. */
+      allow update: if isOwner(userId) && validTransactionDocument();
       allow delete: if isOwner(userId);
     }
 
