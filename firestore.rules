@@ -7,6 +7,7 @@ rules_version = '2';
  *   users/{userId}/accounts/{accountId}
  *   users/{userId}/transactions/{transactionId}
  *   users/{userId}/categories/{categoryId}
+ *   users/{userId}/scheduledTransactions/{id}  — one-time or recurring templates
  *
  * Only the signed-in user whose UID equals {userId} may read/write these paths.
  * The parent document users/{userId} is not used by the app and is locked down.
@@ -99,6 +100,50 @@ service cloud.firestore {
         && optionalCurrencyOk();
     }
 
+    /** Scheduled / recurring transaction templates (client applies due items on load). */
+    function validScheduledDocument() {
+      let d = request.resource.data;
+      return d.keys().hasAll([
+          'desc',
+          'amount',
+          'type',
+          'category',
+          'accountId',
+          'scheduleType',
+          'nextRunAt',
+          'enabled',
+          'createdAt'
+        ])
+        && d.desc is string
+        && d.desc.size() > 0
+        && d.desc.size() < 500
+        && d.amount is number
+        && d.amount >= 0
+        && d.type is string
+        && (d.type == 'income' || d.type == 'expense')
+        && d.category is string
+        && d.category.size() > 0
+        && d.category.size() < 200
+        && d.accountId is string
+        && d.accountId.size() > 0
+        && d.scheduleType is string
+        && (d.scheduleType == 'once' || d.scheduleType == 'recurring')
+        && d.nextRunAt is timestamp
+        && d.enabled is bool
+        && d.createdAt is timestamp
+        && optionalCurrencyOk()
+        && (!d.keys().hasAny(['lastRunAt']) || d.lastRunAt is timestamp)
+        && (
+          (d.scheduleType == 'once' && !d.keys().hasAny(['frequency']))
+          || (
+            d.scheduleType == 'recurring'
+            && d.keys().hasAll(['frequency'])
+            && d.frequency is string
+            && d.frequency in ['daily', 'weekly', 'monthly']
+          )
+        );
+    }
+
     /* No direct access to the user root document (subcollections still work). */
     match /users/{userId} {
       allow read, write: if false;
@@ -123,6 +168,13 @@ service cloud.firestore {
       allow create: if isOwner(userId) && validTransactionDocument();
       /* Edits in TransactionList; category renames batch-update category only. */
       allow update: if isOwner(userId) && validTransactionDocument();
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/scheduledTransactions/{scheduledId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && validScheduledDocument();
+      allow update: if isOwner(userId) && validScheduledDocument();
       allow delete: if isOwner(userId);
     }
 

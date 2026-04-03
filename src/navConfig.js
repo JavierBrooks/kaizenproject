@@ -2,6 +2,12 @@
 export const APP_NAV_ITEMS = [
   { to: "/", end: true, label: "Home", shortLabel: "Home", icon: "⌂" },
   {
+    to: "/scheduled",
+    label: "Scheduled",
+    shortLabel: "Plan",
+    icon: "◷",
+  },
+  {
     to: "/accounts",
     label: "Accounts",
     shortLabel: "Accounts",

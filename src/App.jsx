@@ -10,6 +10,7 @@ import DashboardPage from "./pages/DashboardPage";
 import AccountsPage from "./pages/AccountsPage";
 import AddTransactionPage from "./pages/AddTransactionPage";
 import TransactionListPage from "./pages/TransactionListPage";
+import ScheduledPage from "./pages/ScheduledPage";
 
 export default function App() {
   const { theme, toggleTheme } = useTheme();
@@ -59,6 +60,7 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="scheduled" element={<ScheduledPage />} />
         <Route path="accounts" element={<AccountsPage />} />
         <Route path="transactions/new" element={<AddTransactionPage />} />
         <Route path="transactions" element={<TransactionListPage />} />
