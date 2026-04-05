@@ -38,6 +38,16 @@ export default function ScheduledTransactions({ user }) {
   const [scheduleType, setScheduleType] = useState("once");
   const [frequency, setFrequency] = useState("monthly");
   const [nextRunLocal, setNextRunLocal] = useState("");
+  const [scheduleExpanded, setScheduleExpanded] = useState(() => new Set());
+
+  const toggleScheduleRow = (id) => {
+    setScheduleExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const loadAccounts = async () => {
     const snapshot = await getDocs(
@@ -361,45 +371,87 @@ export default function ScheduledTransactions({ user }) {
         {scheduled.length === 0 ? (
           <p>No scheduled transactions yet.</p>
         ) : (
-          <div className="table-wrap table-wrap--responsive">
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th scope="col">Next run</th>
-                  <th scope="col">Description</th>
-                  <th scope="col">Type</th>
-                  <th scope="col" className="num">
-                    Amount
-                  </th>
-                  <th scope="col">Account</th>
-                  <th scope="col">Repeat</th>
-                  <th scope="col">Active</th>
-                  <th scope="col">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scheduled.map((row) => (
-                  <tr key={row.id}>
-                    <td data-label="Next run">
-                      {formatScheduledRunAt(row.nextRunAt)}
-                    </td>
-                    <td data-label="Description">{row.desc}</td>
-                    <td data-label="Type">{row.type}</td>
-                    <td className="num" data-label="Amount">
+          <ul className="dash-accordion dash-accordion--schedule">
+            {scheduled.map((row, idx) => {
+              const open = scheduleExpanded.has(row.id);
+              const panelId = `sched-upcoming-${idx}`;
+              const repeatLabel =
+                row.scheduleType === "recurring"
+                  ? row.frequency ?? "—"
+                  : "once";
+              return (
+                <li key={row.id} className="dash-accordion__item">
+                  <button
+                    type="button"
+                    className="dash-accordion__trigger"
+                    aria-expanded={open}
+                    aria-controls={panelId}
+                    onClick={() => toggleScheduleRow(row.id)}
+                  >
+                    <span className="dash-accordion__trigger-start">
+                      <span className="dash-accordion__chevron" aria-hidden>
+                        {open ? "▼" : "▶"}
+                      </span>
+                      <span className="dash-accordion__title">
+                        {row.desc != null && String(row.desc).trim() !== ""
+                          ? String(row.desc).trim()
+                          : "—"}
+                      </span>
+                    </span>
+                    <span className="dash-accordion__summary num">
                       {formatMoneyAmount(
                         Number(row.amount) || 0,
                         normalizeCurrency(row.currency)
                       )}
-                    </td>
-                    <td data-label="Account">
+                    </span>
+                  </button>
+                  <div className="dash-accordion__schedule-meta">
+                    <div className="dash-accordion__schedule-when">
+                      {formatScheduledRunAt(row.nextRunAt)}
+                    </div>
+                    <div className="dash-accordion__schedule-chips">
+                      {row.type} · {repeatLabel} ·{" "}
                       {accountName(row.accountId)}
-                    </td>
-                    <td data-label="Repeat">
-                      {row.scheduleType === "recurring"
-                        ? row.frequency ?? "—"
-                        : "once"}
-                    </td>
-                    <td data-label="Active" className="report-td--control">
+                      {!row.enabled ? (
+                        <span className="dash-accordion__schedule-paused">
+                          {" "}
+                          · paused
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div
+                    id={panelId}
+                    className="dash-accordion__panel"
+                    hidden={!open}
+                  >
+                    <dl className="dash-accordion__stats">
+                      <div>
+                        <dt>Category</dt>
+                        <dd>
+                          {row.category != null && String(row.category).trim()
+                            ? String(row.category)
+                            : "—"}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Type</dt>
+                        <dd>{row.type}</dd>
+                      </div>
+                      <div>
+                        <dt>Account</dt>
+                        <dd>{accountName(row.accountId)}</dd>
+                      </div>
+                      <div>
+                        <dt>Repeat</dt>
+                        <dd>{repeatLabel}</dd>
+                      </div>
+                      <div>
+                        <dt>Status</dt>
+                        <dd>{row.enabled ? "Active" : "Paused"}</dd>
+                      </div>
+                    </dl>
+                    <div className="dash-accordion__schedule-actions">
                       <button
                         type="button"
                         className="btn btn--secondary btn--small"
@@ -407,8 +459,6 @@ export default function ScheduledTransactions({ user }) {
                       >
                         {row.enabled ? "Pause" : "Resume"}
                       </button>
-                    </td>
-                    <td data-label="Actions" className="report-td--control">
                       <button
                         type="button"
                         className="btn btn--danger btn--small"
@@ -416,12 +466,12 @@ export default function ScheduledTransactions({ user }) {
                       >
                         Remove
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
     </>
