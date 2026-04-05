@@ -8,6 +8,31 @@ export function transactionToDate(createdAt) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * Parse a month filter value from `<input type="month">` ("YYYY-MM").
+ * @returns {{ anchor: Date, label: string } | null}
+ */
+export function parseMonthFilter(filterMonthValue) {
+  if (!filterMonthValue || typeof filterMonthValue !== "string") return null;
+  const parts = filterMonthValue.split("-").map(Number);
+  const y = parts[0];
+  const mo = parts[1];
+  if (
+    !Number.isFinite(y) ||
+    !Number.isFinite(mo) ||
+    mo < 1 ||
+    mo > 12
+  ) {
+    return null;
+  }
+  const anchor = new Date(y, mo - 1, 1, 12, 0, 0, 0);
+  const label = anchor.toLocaleDateString(undefined, {
+    month: "long",
+    year: "numeric",
+  });
+  return { anchor, label };
+}
+
 /** @returns {"income" | "expense"} */
 export function getCategoryKind(cat) {
   if (cat && cat.kind === "income") return "income";

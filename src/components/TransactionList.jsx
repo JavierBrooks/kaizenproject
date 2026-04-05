@@ -19,6 +19,9 @@ import {
   fetchUserCategories,
   getCategoryKind,
   transactionToDate,
+  parseMonthFilter,
+  sumExpenseForCategoryInMonth,
+  sumIncomeForCategoryInMonth,
 } from "../utils/categoryBudget";
 import {
   convertAmount,
@@ -366,6 +369,93 @@ export default function TransactionList({ user }) {
     return merged;
   }, [categories, transactions]);
 
+  /** When both month and category filters are set, show budget / income context for that period. */
+  const categoryMonthInsight = useMemo(() => {
+    if (!filterMonth || !filterCategory) return null;
+    const ctx = parseMonthFilter(filterMonth);
+    if (!ctx) return null;
+    const { anchor, label } = ctx;
+    const cat = categories.find(
+      (c) => String(c.name ?? "").trim() === filterCategory
+    );
+
+    if (!cat) {
+      const spentUsd = sumExpenseForCategoryInMonth(
+        transactions,
+        filterCategory,
+        anchor,
+        "USD"
+      );
+      const incomeUsd = sumIncomeForCategoryInMonth(
+        transactions,
+        filterCategory,
+        anchor,
+        "USD"
+      );
+      return {
+        kind: "orphan",
+        label,
+        category: filterCategory,
+        spentExpenseUsd: spentUsd,
+        totalIncomeUsd: incomeUsd,
+      };
+    }
+
+    if (getCategoryKind(cat) === "income") {
+      const cur = normalizeCurrency(cat.currency);
+      const totalIncome = sumIncomeForCategoryInMonth(
+        transactions,
+        filterCategory,
+        anchor,
+        cur
+      );
+      return {
+        kind: "income",
+        label,
+        category: filterCategory,
+        currency: cur,
+        totalIncome,
+      };
+    }
+
+    const budget = Number(cat.budget);
+    const cur = normalizeCurrency(cat.currency);
+    const spent = sumExpenseForCategoryInMonth(
+      transactions,
+      filterCategory,
+      anchor,
+      cur
+    );
+
+    if (!Number.isFinite(budget) || budget < 0) {
+      return {
+        kind: "expense-no-budget",
+        label,
+        category: filterCategory,
+        currency: cur,
+        spent,
+      };
+    }
+
+    const remaining = budget - spent;
+    const pctUsed =
+      budget > 1e-9 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
+    const over = spent > budget + 1e-9;
+
+    return {
+      kind: "expense-budget",
+      label,
+      category: filterCategory,
+      budget,
+      spent,
+      remaining,
+      currency: cur,
+      pctUsed,
+      barWidthPct: Math.min(pctUsed, 100),
+      over,
+    };
+  }, [filterMonth, filterCategory, categories, transactions]);
+
   const filteredTransactions = useMemo(() => {
     let y;
     let m;
@@ -454,6 +544,148 @@ export default function TransactionList({ user }) {
               </select>
             </label>
           </div>
+
+          {categoryMonthInsight ? (
+            <div
+              className="txn-month-insight"
+              aria-labelledby="txn-month-insight-title"
+            >
+              <h3 id="txn-month-insight-title" className="txn-month-insight__title">
+                {categoryMonthInsight.label} · {categoryMonthInsight.category}
+              </h3>
+              {categoryMonthInsight.kind === "expense-budget" ? (
+                <>
+                  <p className="txn-month-insight__lede">
+                    Budget utilization for this expense category (calendar month).
+                  </p>
+                  <dl className="txn-month-insight__stats">
+                    <div>
+                      <dt>Budget</dt>
+                      <dd>
+                        {formatMoneyAmount(
+                          categoryMonthInsight.budget,
+                          categoryMonthInsight.currency
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Spent</dt>
+                      <dd>
+                        {formatMoneyAmount(
+                          categoryMonthInsight.spent,
+                          categoryMonthInsight.currency
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Left</dt>
+                      <dd
+                        className={
+                          categoryMonthInsight.remaining < -1e-9
+                            ? "txn-month-insight__neg"
+                            : "txn-month-insight__pos"
+                        }
+                      >
+                        {formatMoneyAmount(
+                          categoryMonthInsight.remaining,
+                          categoryMonthInsight.currency
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Used</dt>
+                      <dd>
+                        {categoryMonthInsight.pctUsed.toFixed(0)}% of budget
+                      </dd>
+                    </div>
+                  </dl>
+                  <div
+                    className="budget-bar budget-bar--txn-insight"
+                    title={`${categoryMonthInsight.pctUsed.toFixed(0)}% of budget`}
+                  >
+                    <div
+                      className={
+                        "budget-bar__fill" +
+                        (categoryMonthInsight.over
+                          ? " budget-bar__fill--over"
+                          : "")
+                      }
+                      style={{
+                        width: `${categoryMonthInsight.barWidthPct}%`,
+                      }}
+                    />
+                  </div>
+                  {categoryMonthInsight.over ? (
+                    <p className="budget-flag" role="status">
+                      Over budget for this month
+                    </p>
+                  ) : null}
+                </>
+              ) : null}
+              {categoryMonthInsight.kind === "expense-no-budget" ? (
+                <>
+                  <p className="txn-month-insight__lede">
+                    This expense category has no monthly budget on Accounts.
+                    Spent this month:
+                  </p>
+                  <p className="txn-month-insight__highlight">
+                    {formatMoneyAmount(
+                      categoryMonthInsight.spent,
+                      categoryMonthInsight.currency
+                    )}
+                  </p>
+                </>
+              ) : null}
+              {categoryMonthInsight.kind === "income" ? (
+                <>
+                  <p className="txn-month-insight__lede">
+                    Total income recorded for this category in this month.
+                  </p>
+                  <p className="txn-month-insight__highlight">
+                    {formatMoneyAmount(
+                      categoryMonthInsight.totalIncome,
+                      categoryMonthInsight.currency
+                    )}
+                  </p>
+                </>
+              ) : null}
+              {categoryMonthInsight.kind === "orphan" ? (
+                <>
+                  <p className="txn-month-insight__lede">
+                    This name is not in your Accounts categories (legacy or
+                    renamed). Totals shown in USD.
+                  </p>
+                  <dl className="txn-month-insight__stats">
+                    <div>
+                      <dt>Expenses (month)</dt>
+                      <dd>
+                        {formatMoneyAmount(
+                          categoryMonthInsight.spentExpenseUsd,
+                          "USD"
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Income (month)</dt>
+                      <dd>
+                        {formatMoneyAmount(
+                          categoryMonthInsight.totalIncomeUsd,
+                          "USD"
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
+          {!filterMonth || !filterCategory ? (
+            <p className="txn-month-insight__hint">
+              Select a <strong>month</strong> and a <strong>category</strong> to
+              see budget utilization and what was left for that period.
+            </p>
+          ) : null}
 
           {sortedForDisplay.length === 0 ? (
             <p className="txn-list__empty-filters">
