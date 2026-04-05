@@ -43,7 +43,9 @@ export default function Accounts({ user }) {
   const [transactions, setTransactions] = useState([]);
   const [deletingAccountId, setDeletingAccountId] = useState(null);
   const [selectedAccountId, setSelectedAccountId] = useState(null);
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
+  const [categoryAccordionOpen, setCategoryAccordionOpen] = useState(
+    () => new Set()
+  );
   const [transferPanelForId, setTransferPanelForId] = useState(null);
   const [transferDestId, setTransferDestId] = useState("");
   const [transferAmount, setTransferAmount] = useState("");
@@ -214,7 +216,11 @@ export default function Accounts({ user }) {
     try {
       await deleteDoc(doc(db, "users", user.uid, "categories", cat.id));
       await refreshCategoriesAndTx();
-      setSelectedCategoryId((s) => (s === cat.id ? null : s));
+      setCategoryAccordionOpen((prev) => {
+        const next = new Set(prev);
+        next.delete(cat.id);
+        return next;
+      });
     } catch (err) {
       alert(err.message ?? "Could not delete category.");
     }
@@ -327,8 +333,13 @@ export default function Accounts({ user }) {
     }
   };
 
-  const toggleCategoryRow = (id) => {
-    setSelectedCategoryId((s) => (s === id ? null : id));
+  const toggleCategoryAccordion = (id) => {
+    setCategoryAccordionOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const rowKeyToggle = (e, onToggle) => {
@@ -920,15 +931,13 @@ export default function Accounts({ user }) {
           </p>
         ) : (
           <>
-            <p className="hint-select-row show-mobile-only">
-              Tap a category to show <strong>Edit</strong> and <strong>Delete</strong>.
-            </p>
-            <p className="hint-select-row show-desktop-only">
-              Select a row to show <strong>Edit</strong> and <strong>Delete</strong>.
+            <p className="hint-select-row">
+              Expand a category for full details and actions. Budget usage bars
+              reflect the current calendar month.
             </p>
 
-            <ul className="mobile-entity-list show-mobile-only">
-              {sortedCategories.map((cat) => {
+            <ul className="dash-accordion dash-accordion--categories">
+              {sortedCategories.map((cat, idx) => {
                 const isIncome = getCategoryKind(cat) === "income";
                 const catCur = normalizeCurrency(cat.currency);
                 const budget = Number(cat.budget);
@@ -960,252 +969,143 @@ export default function Accounts({ user }) {
                 const leftDisplay = over
                   ? formatMoneyAmount(left, catCur)
                   : leftStr;
-                const progressPct =
-                  !isIncome && Number.isFinite(budget) && budget > 0
-                    ? Math.min(100, Math.max(0, (monthTotal / budget) * 100))
-                    : 0;
-                const isSelected = selectedCategoryId === cat.id;
+                const showBudgetBar =
+                  !isIncome &&
+                  Number.isFinite(budget) &&
+                  budget > 1e-9;
+                const pctOfBudget = showBudgetBar
+                  ? (monthTotal / budget) * 100
+                  : 0;
+                const barWidthPct = Math.min(
+                  Number.isFinite(pctOfBudget) ? pctOfBudget : 0,
+                  100
+                );
+                const open = categoryAccordionOpen.has(cat.id);
+                const panelId = `acc-category-${idx}`;
                 return (
                   <li
                     key={cat.id}
-                    role="button"
-                    tabIndex={0}
                     className={
-                      isSelected ? "mobile-entity-list__item--selected" : ""
-                    }
-                    onClick={() => toggleCategoryRow(cat.id)}
-                    onKeyDown={(e) =>
-                      rowKeyToggle(e, () => toggleCategoryRow(cat.id))
+                      "dash-accordion__item" +
+                      (over ? " dash-accordion__item--over" : "")
                     }
                   >
-                    <div className="mobile-entity-list__main">
-                      <div className="accounts-mobile__row">
-                        <span className="accounts-mobile__name">
-                          {cat.name}
+                    <button
+                      type="button"
+                      className="dash-accordion__trigger dash-accordion__trigger--budget-head"
+                      aria-expanded={open}
+                      aria-controls={panelId}
+                      onClick={() => toggleCategoryAccordion(cat.id)}
+                    >
+                      <span className="dash-accordion__trigger-start">
+                        <span className="dash-accordion__chevron" aria-hidden>
+                          {open ? "▼" : "▶"}
                         </span>
-                      </div>
-                      <dl className="cat-mobile__stats">
-                        <dt>Type</dt>
-                        <dd>{isIncome ? "Income" : "Expense"}</dd>
-                        <dt>Budget</dt>
-                        <dd>{budgetStr}</dd>
-                        <dt>{isIncome ? "Received (month)" : "Spent (month)"}</dt>
-                        <dd>{monthStr}</dd>
-                        <dt>Left</dt>
-                        <dd className={over ? "budget-over" : ""}>
-                          {isIncome ? "—" : leftDisplay}
-                        </dd>
-                      </dl>
-                      {!isIncome && Number.isFinite(budget) ? (
-                        <div className="budget-progress">
-                          <div className="budget-progress__row">
-                            <span>Budget usage</span>
-                            <strong>{progressPct.toFixed(0)}%</strong>
-                          </div>
+                        <span className="dash-accordion__title">{cat.name}</span>
+                      </span>
+                      <span className="dash-accordion__budget-pct" aria-hidden>
+                        {isIncome
+                          ? "Income"
+                          : showBudgetBar
+                            ? `${pctOfBudget.toFixed(0)}%`
+                            : "Expense"}
+                      </span>
+                    </button>
+                    <div className="dash-accordion__budget-bar-wrap">
+                      {showBudgetBar ? (
+                        <>
                           <div
-                            className={
-                              "budget-progress__track" +
-                              (over ? " budget-progress__track--over" : "")
-                            }
-                            role="progressbar"
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={Math.min(100, progressPct)}
-                            aria-label={`Budget usage for ${cat.name}`}
+                            className="budget-bar budget-bar--dash"
+                            title={`${pctOfBudget.toFixed(0)}% of monthly budget`}
                           >
                             <div
                               className={
-                                "budget-progress__fill" +
-                                (over ? " budget-progress__fill--over" : "")
+                                "budget-bar__fill" +
+                                (over ? " budget-bar__fill--over" : "")
                               }
-                              style={{ width: `${progressPct}%` }}
+                              style={{ width: `${barWidthPct}%` }}
                             />
                           </div>
-                        </div>
-                      ) : null}
+                          {over ? (
+                            <span className="budget-flag">Over budget</span>
+                          ) : null}
+                        </>
+                      ) : isIncome ? (
+                        <p className="dash-accordion__schedule-chips">
+                          Income · {catCur} · This month: {monthStr}
+                        </p>
+                      ) : (
+                        <p className="dash-accordion__schedule-chips">
+                          Expense · {monthStr} spent this month
+                          {Number.isFinite(budget) && budget <= 1e-9
+                            ? " · no monthly cap"
+                            : ""}
+                        </p>
+                      )}
                     </div>
-                    {isSelected && (
-                      <div
-                        className="mobile-entity-list__actions"
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                    <div
+                      id={panelId}
+                      className="dash-accordion__panel"
+                      hidden={!open}
+                    >
+                      <dl className="dash-accordion__stats">
+                        <div>
+                          <dt>Type</dt>
+                          <dd>{isIncome ? "Income" : "Expense"}</dd>
+                        </div>
+                        <div>
+                          <dt>Currency</dt>
+                          <dd>{catCur}</dd>
+                        </div>
+                        <div>
+                          <dt>Monthly budget</dt>
+                          <dd>{budgetStr}</dd>
+                        </div>
+                        <div>
+                          <dt>{isIncome ? "Received (month)" : "Spent (month)"}</dt>
+                          <dd>{monthStr}</dd>
+                        </div>
+                        {!isIncome ? (
+                          <div>
+                            <dt>Left</dt>
+                            <dd
+                              className={
+                                over ? "report-table__neg" : "report-table__pos"
+                              }
+                            >
+                              {leftDisplay}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                      <div className="dash-accordion__schedule-actions">
                         <button
                           type="button"
-                          className="btn btn--secondary"
+                          className="btn btn--secondary btn--small"
                           onClick={() => viewCategoryTransactions(cat.name)}
                         >
                           View transactions
                         </button>
                         <button
                           type="button"
-                          className="btn btn--subtle"
+                          className="btn btn--subtle btn--small"
                           onClick={() => startEditingCategory(cat)}
                         >
                           Edit category
                         </button>
                         <button
                           type="button"
-                          className="btn btn--danger"
+                          className="btn btn--danger btn--small"
                           onClick={() => removeCategory(cat)}
                         >
                           Delete category
                         </button>
                       </div>
-                    )}
+                    </div>
                   </li>
                 );
               })}
             </ul>
-
-            <div className="table-wrap show-desktop-only">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Category</th>
-                    <th>Type</th>
-                    <th className="num">Monthly budget</th>
-                    <th className="num">This month</th>
-                    <th className="num">Left</th>
-                    <th>Usage</th>
-                    <th aria-label="Actions" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedCategories.map((cat) => {
-                    const isIncome = getCategoryKind(cat) === "income";
-                    const catCur = normalizeCurrency(cat.currency);
-                    const budget = Number(cat.budget);
-                    const budgetStr =
-                      isIncome || !Number.isFinite(budget)
-                        ? "—"
-                        : formatMoneyAmount(budget, catCur);
-                    const monthTotal = isIncome
-                      ? sumIncomeForCategoryInMonth(
-                          transactions,
-                          cat.name,
-                          now,
-                          catCur
-                        )
-                      : sumExpenseForCategoryInMonth(
-                          transactions,
-                          cat.name,
-                          now,
-                          catCur
-                        );
-                    const monthStr = formatMoneyAmount(monthTotal, catCur);
-                    const left = !isIncome && Number.isFinite(budget)
-                      ? budget - monthTotal
-                      : NaN;
-                    const leftStr = Number.isFinite(left)
-                      ? formatMoneyAmount(Math.max(0, left), catCur)
-                      : "—";
-                    const over = !isIncome && Number.isFinite(left) && left < 0;
-                    const progressPct =
-                      !isIncome && Number.isFinite(budget) && budget > 0
-                        ? Math.min(100, Math.max(0, (monthTotal / budget) * 100))
-                        : 0;
-                    const isSelected = selectedCategoryId === cat.id;
-                    return (
-                      <tr
-                        key={cat.id}
-                        className={
-                          "data-row--interactive" +
-                          (isSelected ? " data-row--selected" : "")
-                        }
-                        tabIndex={0}
-                        onClick={() => toggleCategoryRow(cat.id)}
-                        onKeyDown={(e) =>
-                          rowKeyToggle(e, () => toggleCategoryRow(cat.id))
-                        }
-                      >
-                        <td>{cat.name}</td>
-                        <td>{isIncome ? "Income" : "Expense"}</td>
-                        <td className="num">{budgetStr}</td>
-                        <td className="num">{monthStr}</td>
-                        <td
-                          className={"num" + (over ? " budget-over" : "")}
-                        >
-                          {isIncome
-                            ? "—"
-                            : over
-                              ? formatMoneyAmount(left, catCur)
-                              : leftStr}
-                        </td>
-                        <td>
-                          {!isIncome && Number.isFinite(budget) ? (
-                            <div className="budget-progress budget-progress--compact">
-                              <div
-                                className={
-                                  "budget-progress__track" +
-                                  (over ? " budget-progress__track--over" : "")
-                                }
-                                role="progressbar"
-                                aria-valuemin={0}
-                                aria-valuemax={100}
-                                aria-valuenow={Math.min(100, progressPct)}
-                                aria-label={`Budget usage for ${cat.name}`}
-                              >
-                                <div
-                                  className={
-                                    "budget-progress__fill" +
-                                    (over ? " budget-progress__fill--over" : "")
-                                  }
-                                  style={{ width: `${progressPct}%` }}
-                                />
-                              </div>
-                              <span className="budget-progress__compact-label">
-                                {progressPct.toFixed(0)}%
-                              </span>
-                            </div>
-                          ) : (
-                            "—"
-                          )}
-                        </td>
-                        <td onClick={(e) => e.stopPropagation()}>
-                          {isSelected ? (
-                            <div className="account-actions-row account-actions-row--compact">
-                              <button
-                                type="button"
-                                className="btn btn--secondary"
-                                style={{
-                                  padding: "0.4rem 0.65rem",
-                                  fontSize: "0.82rem",
-                                }}
-                                onClick={() => viewCategoryTransactions(cat.name)}
-                              >
-                                View
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn--subtle"
-                                style={{
-                                  padding: "0.4rem 0.65rem",
-                                  fontSize: "0.82rem",
-                                }}
-                                onClick={() => startEditingCategory(cat)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn--danger"
-                                style={{
-                                  padding: "0.4rem 0.65rem",
-                                  fontSize: "0.82rem",
-                                }}
-                                onClick={() => removeCategory(cat)}
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          ) : null}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
           </>
         )}
       </section>
