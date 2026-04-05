@@ -26,6 +26,18 @@ export default function Dashboard({ user }) {
   const [scheduledPipeline, setScheduledPipeline] = useState([]);
   const [loading, setLoading] = useState(true);
   const [reportMonth] = useState(() => new Date());
+  const [cfExpanded, setCfExpanded] = useState(() => new Set());
+  const [bsExpanded, setBsExpanded] = useState(() => new Set());
+  const [budgetExpanded, setBudgetExpanded] = useState(() => new Set());
+
+  const toggleId = (setFn, id) => {
+    setFn((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -207,48 +219,64 @@ export default function Dashboard({ user }) {
           ) ? (
           <p>No transactions this month yet.</p>
         ) : (
-          <div className="table-wrap table-wrap--responsive">
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th scope="col">Account</th>
-                  <th scope="col" className="num">
-                    Income
-                  </th>
-                  <th scope="col" className="num">
-                    Expenses
-                  </th>
-                  <th scope="col" className="num">
-                    Net
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {cashFlowRows.map((r) => (
-                  <tr key={r.accountId}>
-                    <td data-label="Account">{r.name}</td>
-                    <td className="num" data-label="Income">
-                      {formatMoneyAmount(r.income, r.currency)}
-                    </td>
-                    <td className="num" data-label="Expenses">
-                      {formatMoneyAmount(r.expense, r.currency)}
-                    </td>
-                    <td
+          <ul className="dash-accordion">
+            {cashFlowRows.map((r) => {
+              const open = cfExpanded.has(r.accountId);
+              const panelId = `dash-cf-${r.accountId}`;
+              return (
+                <li key={r.accountId} className="dash-accordion__item">
+                  <button
+                    type="button"
+                    className="dash-accordion__trigger"
+                    aria-expanded={open}
+                    aria-controls={panelId}
+                    onClick={() => toggleId(setCfExpanded, r.accountId)}
+                  >
+                    <span className="dash-accordion__trigger-start">
+                      <span className="dash-accordion__chevron" aria-hidden>
+                        {open ? "▼" : "▶"}
+                      </span>
+                      <span className="dash-accordion__title">{r.name}</span>
+                    </span>
+                    <span
                       className={
-                        "num " +
-                        (r.net >= 0
-                          ? "report-table__pos"
-                          : "report-table__neg")
+                        "dash-accordion__summary " +
+                        (r.net >= 0 ? "report-table__pos" : "report-table__neg")
                       }
-                      data-label="Net"
                     >
-                      {formatMoneyAmount(r.net, r.currency)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      Net {formatMoneyAmount(r.net, r.currency)}
+                    </span>
+                  </button>
+                  <div
+                    id={panelId}
+                    className="dash-accordion__panel"
+                    hidden={!open}
+                  >
+                    <dl className="dash-accordion__stats">
+                      <div>
+                        <dt>Income</dt>
+                        <dd>{formatMoneyAmount(r.income, r.currency)}</dd>
+                      </div>
+                      <div>
+                        <dt>Expenses</dt>
+                        <dd>{formatMoneyAmount(r.expense, r.currency)}</dd>
+                      </div>
+                      <div>
+                        <dt>Net</dt>
+                        <dd
+                          className={
+                            r.net >= 0 ? "report-table__pos" : "report-table__neg"
+                          }
+                        >
+                          {formatMoneyAmount(r.net, r.currency)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
 
@@ -272,41 +300,52 @@ export default function Dashboard({ user }) {
               </span>
             </div>
             <h3 className="card__subtitle">By account</h3>
-            <div className="table-wrap table-wrap--responsive">
-              <table className="report-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Account</th>
-                    <th scope="col" className="num">
-                      Balance
-                    </th>
-                    <th scope="col" className="num">
-                      In USD
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {accounts.map((a) => {
-                    const cur = normalizeCurrency(a.currency);
-                    const bal = Number(a.balance) || 0;
-                    const usd = convertAmount(bal, cur, "USD");
-                    return (
-                      <tr key={a.id}>
-                        <td data-label="Account">
+            <ul className="dash-accordion">
+              {accounts.map((a) => {
+                const cur = normalizeCurrency(a.currency);
+                const bal = Number(a.balance) || 0;
+                const usd = convertAmount(bal, cur, "USD");
+                const open = bsExpanded.has(a.id);
+                const panelId = `dash-bs-${a.id}`;
+                return (
+                  <li key={a.id} className="dash-accordion__item">
+                    <button
+                      type="button"
+                      className="dash-accordion__trigger"
+                      aria-expanded={open}
+                      aria-controls={panelId}
+                      onClick={() => toggleId(setBsExpanded, a.id)}
+                    >
+                      <span className="dash-accordion__trigger-start">
+                        <span className="dash-accordion__chevron" aria-hidden>
+                          {open ? "▼" : "▶"}
+                        </span>
+                        <span className="dash-accordion__title">
                           {String(a.name ?? "")}
-                        </td>
-                        <td className="num" data-label="Balance">
-                          {formatMoneyAmount(bal, cur)}
-                        </td>
-                        <td className="num muted" data-label="In USD">
-                          {formatMoneyAmount(usd, "USD")}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </span>
+                      </span>
+                      <span className="dash-accordion__summary num">
+                        {formatMoneyAmount(bal, cur)}
+                      </span>
+                    </button>
+                    <div
+                      id={panelId}
+                      className="dash-accordion__panel"
+                      hidden={!open}
+                    >
+                      <dl className="dash-accordion__stats dash-accordion__stats--single">
+                        <div>
+                          <dt>In USD</dt>
+                          <dd className="muted">
+                            {formatMoneyAmount(usd, "USD")}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
           </>
         )}
       </section>
@@ -349,66 +388,84 @@ export default function Dashboard({ user }) {
             Accounts to track spending against targets.
           </p>
         ) : (
-          <div className="table-wrap table-wrap--responsive">
-            <table className="report-table report-table--budget">
-              <thead>
-                <tr>
-                  <th scope="col">Category</th>
-                  <th scope="col" className="num">
-                    Budget
-                  </th>
-                  <th scope="col" className="num">
-                    Spent
-                  </th>
-                  <th scope="col" className="num">
-                    Left
-                  </th>
-                  <th scope="col">Progress</th>
-                </tr>
-              </thead>
-              <tbody>
-                {budgetRows.map((row) => (
-                  <tr key={row.category} className={row.over ? "row-over" : ""}>
-                    <td data-label="Category">{row.category}</td>
-                    <td className="num" data-label="Budget">
-                      {formatMoneyAmount(row.budget, row.currency)}
-                    </td>
-                    <td className="num" data-label="Spent">
-                      {formatMoneyAmount(row.spent, row.currency)}
-                    </td>
-                    <td
-                      className={
-                        "num " +
-                        (row.remaining < -1e-9
-                          ? "report-table__neg"
-                          : "report-table__pos")
-                      }
-                      data-label="Left"
+          <ul className="dash-accordion dash-accordion--budget">
+            {budgetRows.map((row, idx) => {
+              const open = budgetExpanded.has(row.category);
+              const panelId = `dash-budget-${idx}`;
+              return (
+                <li
+                  key={row.category}
+                  className={
+                    "dash-accordion__item" +
+                    (row.over ? " dash-accordion__item--over" : "")
+                  }
+                >
+                  <button
+                    type="button"
+                    className="dash-accordion__trigger dash-accordion__trigger--budget-head"
+                    aria-expanded={open}
+                    aria-controls={panelId}
+                    onClick={() => toggleId(setBudgetExpanded, row.category)}
+                  >
+                    <span className="dash-accordion__trigger-start">
+                      <span className="dash-accordion__chevron" aria-hidden>
+                        {open ? "▼" : "▶"}
+                      </span>
+                      <span className="dash-accordion__title">{row.category}</span>
+                    </span>
+                    <span className="dash-accordion__budget-pct" aria-hidden>
+                      {row.pctOfBudget.toFixed(0)}%
+                    </span>
+                  </button>
+                  <div className="dash-accordion__budget-bar-wrap">
+                    <div
+                      className="budget-bar budget-bar--dash"
+                      title={`${row.pctOfBudget.toFixed(0)}% of budget`}
                     >
-                      {formatMoneyAmount(row.remaining, row.currency)}
-                    </td>
-                    <td data-label="Progress">
                       <div
-                        className="budget-bar"
-                        title={`${row.pctOfBudget.toFixed(0)}% of budget`}
-                      >
-                        <div
-                          className={
-                            "budget-bar__fill" +
-                            (row.over ? " budget-bar__fill--over" : "")
-                          }
-                          style={{ width: `${row.barWidthPct}%` }}
-                        />
+                        className={
+                          "budget-bar__fill" +
+                          (row.over ? " budget-bar__fill--over" : "")
+                        }
+                        style={{ width: `${row.barWidthPct}%` }}
+                      />
+                    </div>
+                    {row.over ? (
+                      <span className="budget-flag">Over budget</span>
+                    ) : null}
+                  </div>
+                  <div
+                    id={panelId}
+                    className="dash-accordion__panel"
+                    hidden={!open}
+                  >
+                    <dl className="dash-accordion__stats">
+                      <div>
+                        <dt>Budget</dt>
+                        <dd>{formatMoneyAmount(row.budget, row.currency)}</dd>
                       </div>
-                      {row.over ? (
-                        <span className="budget-flag">Over budget</span>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <div>
+                        <dt>Spent</dt>
+                        <dd>{formatMoneyAmount(row.spent, row.currency)}</dd>
+                      </div>
+                      <div>
+                        <dt>Left</dt>
+                        <dd
+                          className={
+                            row.remaining < -1e-9
+                              ? "report-table__neg"
+                              : "report-table__pos"
+                          }
+                        >
+                          {formatMoneyAmount(row.remaining, row.currency)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
 
