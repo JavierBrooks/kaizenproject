@@ -207,7 +207,7 @@ export default function Dashboard({ user }) {
           ) ? (
           <p>No transactions this month yet.</p>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--responsive">
             <table className="report-table">
               <thead>
                 <tr>
@@ -226,11 +226,11 @@ export default function Dashboard({ user }) {
               <tbody>
                 {cashFlowRows.map((r) => (
                   <tr key={r.accountId}>
-                    <td>{r.name}</td>
-                    <td className="num">
+                    <td data-label="Account">{r.name}</td>
+                    <td className="num" data-label="Income">
                       {formatMoneyAmount(r.income, r.currency)}
                     </td>
-                    <td className="num">
+                    <td className="num" data-label="Expenses">
                       {formatMoneyAmount(r.expense, r.currency)}
                     </td>
                     <td
@@ -240,6 +240,7 @@ export default function Dashboard({ user }) {
                           ? "report-table__pos"
                           : "report-table__neg")
                       }
+                      data-label="Net"
                     >
                       {formatMoneyAmount(r.net, r.currency)}
                     </td>
@@ -271,7 +272,7 @@ export default function Dashboard({ user }) {
               </span>
             </div>
             <h3 className="card__subtitle">By account</h3>
-            <div className="table-wrap">
+            <div className="table-wrap table-wrap--responsive">
               <table className="report-table">
                 <thead>
                   <tr>
@@ -291,11 +292,13 @@ export default function Dashboard({ user }) {
                     const usd = convertAmount(bal, cur, "USD");
                     return (
                       <tr key={a.id}>
-                        <td>{String(a.name ?? "")}</td>
-                        <td className="num">
+                        <td data-label="Account">
+                          {String(a.name ?? "")}
+                        </td>
+                        <td className="num" data-label="Balance">
                           {formatMoneyAmount(bal, cur)}
                         </td>
-                        <td className="num muted">
+                        <td className="num muted" data-label="In USD">
                           {formatMoneyAmount(usd, "USD")}
                         </td>
                       </tr>
@@ -346,7 +349,7 @@ export default function Dashboard({ user }) {
             Accounts to track spending against targets.
           </p>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--responsive">
             <table className="report-table report-table--budget">
               <thead>
                 <tr>
@@ -366,11 +369,11 @@ export default function Dashboard({ user }) {
               <tbody>
                 {budgetRows.map((row) => (
                   <tr key={row.category} className={row.over ? "row-over" : ""}>
-                    <td>{row.category}</td>
-                    <td className="num">
+                    <td data-label="Category">{row.category}</td>
+                    <td className="num" data-label="Budget">
                       {formatMoneyAmount(row.budget, row.currency)}
                     </td>
-                    <td className="num">
+                    <td className="num" data-label="Spent">
                       {formatMoneyAmount(row.spent, row.currency)}
                     </td>
                     <td
@@ -380,10 +383,11 @@ export default function Dashboard({ user }) {
                           ? "report-table__neg"
                           : "report-table__pos")
                       }
+                      data-label="Left"
                     >
                       {formatMoneyAmount(row.remaining, row.currency)}
                     </td>
-                    <td>
+                    <td data-label="Progress">
                       <div
                         className="budget-bar"
                         title={`${row.pctOfBudget.toFixed(0)}% of budget`}

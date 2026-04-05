@@ -361,7 +361,7 @@ export default function ScheduledTransactions({ user }) {
         {scheduled.length === 0 ? (
           <p>No scheduled transactions yet.</p>
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--responsive">
             <table className="report-table">
               <thead>
                 <tr>
@@ -380,22 +380,26 @@ export default function ScheduledTransactions({ user }) {
               <tbody>
                 {scheduled.map((row) => (
                   <tr key={row.id}>
-                    <td>{formatScheduledRunAt(row.nextRunAt)}</td>
-                    <td>{row.desc}</td>
-                    <td>{row.type}</td>
-                    <td className="num">
+                    <td data-label="Next run">
+                      {formatScheduledRunAt(row.nextRunAt)}
+                    </td>
+                    <td data-label="Description">{row.desc}</td>
+                    <td data-label="Type">{row.type}</td>
+                    <td className="num" data-label="Amount">
                       {formatMoneyAmount(
                         Number(row.amount) || 0,
                         normalizeCurrency(row.currency)
                       )}
                     </td>
-                    <td>{accountName(row.accountId)}</td>
-                    <td>
+                    <td data-label="Account">
+                      {accountName(row.accountId)}
+                    </td>
+                    <td data-label="Repeat">
                       {row.scheduleType === "recurring"
                         ? row.frequency ?? "—"
                         : "once"}
                     </td>
-                    <td>
+                    <td data-label="Active" className="report-td--control">
                       <button
                         type="button"
                         className="btn btn--secondary btn--small"
@@ -404,7 +408,7 @@ export default function ScheduledTransactions({ user }) {
                         {row.enabled ? "Pause" : "Resume"}
                       </button>
                     </td>
-                    <td>
+                    <td data-label="Actions" className="report-td--control">
                       <button
                         type="button"
                         className="btn btn--danger btn--small"

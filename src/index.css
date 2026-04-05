@@ -533,6 +533,105 @@ textarea:focus {
   min-width: 0;
 }
 
+/* Stacked “cards” per row on narrow screens (no horizontal scroll). */
+@media (max-width: 767px) {
+  .table-wrap--responsive {
+    overflow-x: visible;
+    margin-top: 0.75rem;
+    border: none;
+    background: transparent;
+  }
+
+  .table-wrap--responsive table {
+    min-width: 0 !important;
+    width: 100%;
+    display: block;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+
+  .table-wrap--responsive thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .table-wrap--responsive tbody {
+    display: block;
+  }
+
+  .table-wrap--responsive tbody tr {
+    display: block;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    margin-bottom: 0.75rem;
+    overflow: hidden;
+    background: var(--bg-elevated);
+  }
+
+  .table-wrap--responsive tbody tr:last-child {
+    margin-bottom: 0;
+  }
+
+  .table-wrap--responsive tbody tr:hover td {
+    background: transparent;
+  }
+
+  .table-wrap--responsive tbody tr.row-over td {
+    background: color-mix(
+      in srgb,
+      var(--danger) 8%,
+      var(--bg-elevated)
+    );
+  }
+
+  .table-wrap--responsive tbody td {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.55rem 0.75rem;
+    text-align: right;
+    border-bottom: 1px solid var(--border-subtle);
+    vertical-align: middle;
+    word-break: break-word;
+  }
+
+  .table-wrap--responsive tbody td:last-child {
+    border-bottom: none;
+  }
+
+  .table-wrap--responsive tbody td::before {
+    content: attr(data-label);
+    display: block;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 0.35rem;
+    line-height: 1.3;
+  }
+
+  .table-wrap--responsive .budget-bar {
+    max-width: none;
+    width: 100%;
+  }
+
+  .table-wrap--responsive tbody td.report-td--control .btn {
+    width: 100%;
+    max-width: 16rem;
+    margin-left: auto;
+    display: block;
+  }
+}
+
 tr.data-row--interactive {
   cursor: pointer;
 }
