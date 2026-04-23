@@ -1,8 +1,11 @@
 import { Outlet } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import MobileBottomNav from "../components/MobileBottomNav";
+import { useScheduledReminders } from "../hooks/useScheduledReminders";
 
 export default function AppLayout({ user, theme, onToggleTheme, onSignOut }) {
+  useScheduledReminders(user);
+
   return (
     <div className="app-shell">
       <AppHeader

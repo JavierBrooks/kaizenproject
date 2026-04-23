@@ -22,6 +22,11 @@ import {
   SUPPORTED_CURRENCIES,
   formatMoneyAmount,
 } from "../utils/currency";
+import {
+  notificationsSupported,
+  requestNotificationPermission,
+  getNotificationPermissionState,
+} from "../utils/scheduledReminders";
 
 export default function ScheduledTransactions({ user }) {
   const [accounts, setAccounts] = useState([]);
@@ -39,6 +44,29 @@ export default function ScheduledTransactions({ user }) {
   const [frequency, setFrequency] = useState("monthly");
   const [nextRunLocal, setNextRunLocal] = useState("");
   const [scheduleExpanded, setScheduleExpanded] = useState(() => new Set());
+  const [notifPermission, setNotifPermission] = useState(() =>
+    typeof window !== "undefined"
+      ? getNotificationPermissionState()
+      : "unsupported"
+  );
+
+  useEffect(() => {
+    let prev = getNotificationPermissionState();
+    const sync = () => {
+      const next = getNotificationPermissionState();
+      setNotifPermission(next);
+      if (prev !== "granted" && next === "granted") {
+        window.dispatchEvent(new Event("kaizen-notif-granted"));
+      }
+      prev = next;
+    };
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    return () => {
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
 
   const toggleScheduleRow = (id) => {
     setScheduleExpanded((prev) => {
@@ -236,6 +264,42 @@ export default function ScheduledTransactions({ user }) {
           the app (home or this page). Times use your device&apos;s local time
           zone.
         </p>
+
+        {notificationsSupported() ? (
+          <div className="sched-reminder">
+            <p className="sched-reminder__title">Browser reminders</p>
+            <p className="sched-reminder__text">
+              Get alerts when a schedule is <strong>due</strong>, within about{" "}
+              <strong>an hour</strong>, or on the <strong>same calendar day</strong>.
+              Works while this tab or an installed copy of the site can run—your
+              browser controls notification permission.
+            </p>
+            {notifPermission === "granted" ? (
+              <p className="sched-reminder__status sched-reminder__status--ok">
+                Reminders are on for this browser.
+              </p>
+            ) : notifPermission === "denied" ? (
+              <p className="sched-reminder__status sched-reminder__status--warn">
+                Notifications are blocked. Turn them on in your browser or site
+                settings if you want alerts here.
+              </p>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={async () => {
+                  await requestNotificationPermission();
+                  setNotifPermission(getNotificationPermissionState());
+                  if (getNotificationPermissionState() === "granted") {
+                    window.dispatchEvent(new Event("kaizen-notif-granted"));
+                  }
+                }}
+              >
+                Turn on browser reminders
+              </button>
+            )}
+          </div>
+        ) : null}
 
         {accounts.length === 0 ? (
           <p>

@@ -358,6 +358,15 @@ export default function Accounts({ user }) {
     navigate(`/transactions?${params.toString()}`);
   };
 
+  const viewAccountTransactions = (accountId) => {
+    const params = new URLSearchParams();
+    params.set("account", String(accountId ?? ""));
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    params.set("month", `${y}-${m}`);
+    navigate(`/transactions?${params.toString()}`);
+  };
+
   const startEditingAccount = (acc) => {
     setEditingAccountId(acc.id);
     setAccountEditForm({
@@ -637,11 +646,13 @@ export default function Accounts({ user }) {
         ) : (
           <>
             <p className="hint-select-row show-mobile-only">
-              Tap a row to show <strong>Edit</strong>, <strong>Remove</strong> and{" "}
+              Tap a row to show <strong>View transactions</strong>,{" "}
+              <strong>Edit</strong>, <strong>Remove</strong> and{" "}
               <strong>Transfer</strong>.
             </p>
             <p className="hint-select-row show-desktop-only">
-              Select a row for <strong>Edit</strong>, <strong>Remove</strong> or{" "}
+              Select a row for <strong>View transactions</strong>,{" "}
+              <strong>Edit</strong>, <strong>Remove</strong> or{" "}
               <strong>Transfer</strong> (click or keyboard).
             </p>
             <ul className="mobile-entity-list show-mobile-only">
@@ -685,6 +696,18 @@ export default function Accounts({ user }) {
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="account-actions-row">
+                          <button
+                            type="button"
+                            className="btn btn--secondary"
+                            onClick={() => viewAccountTransactions(acc.id)}
+                            disabled={
+                              busy ||
+                              deletingAccountId !== null ||
+                              transferSaving
+                            }
+                          >
+                            View transactions
+                          </button>
                           <button
                             type="button"
                             className="btn btn--subtle"
@@ -774,6 +797,23 @@ export default function Accounts({ user }) {
                           <td onClick={(e) => e.stopPropagation()}>
                             {isSelected ? (
                               <div className="account-actions-row account-actions-row--compact">
+                                <button
+                                  type="button"
+                                  className="btn btn--secondary"
+                                  style={{
+                                    padding: "0.4rem 0.65rem",
+                                    fontSize: "0.82rem",
+                                  }}
+                                  onClick={() => viewAccountTransactions(acc.id)}
+                                  disabled={
+                                    busy ||
+                                    deletingAccountId !== null ||
+                                    transferSaving
+                                  }
+                                  aria-label={`View transactions for ${acc.name ?? acc.id}`}
+                                >
+                                  View
+                                </button>
                                 <button
                                   type="button"
                                   className="btn btn--subtle"

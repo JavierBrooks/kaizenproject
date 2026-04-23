@@ -802,6 +802,13 @@ tr.data-row--selected:hover td {
   font-weight: 650;
 }
 
+.txn-month-insight__scope {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
 .txn-month-insight__lede {
   margin: 0 0 0.65rem;
   font-size: 0.875rem;
@@ -1466,6 +1473,50 @@ tr.account-transfer-form-row:last-child td {
 .pipeline-list__meta {
   font-size: 0.8125rem;
   color: var(--text-muted);
+}
+
+.sched-reminder {
+  margin-top: 1rem;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg) 35%, var(--bg-elevated));
+}
+
+.sched-reminder__title {
+  margin: 0 0 0.35rem;
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.sched-reminder__text {
+  margin: 0 0 0.65rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.sched-reminder__text strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sched-reminder .btn {
+  margin-top: 0.15rem;
+}
+
+.sched-reminder__status {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.sched-reminder__status--ok {
+  color: var(--accent);
+}
+
+.sched-reminder__status--warn {
+  color: var(--danger);
 }
 
 .wallet-cf-grid {

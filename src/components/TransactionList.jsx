@@ -42,6 +42,7 @@ export default function TransactionList({ user }) {
   const [editingTransactionId, setEditingTransactionId] = useState(null);
   const [filterMonth, setFilterMonth] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
+  const [filterAccount, setFilterAccount] = useState("");
   const [editForm, setEditForm] = useState({
     desc: "",
     date: "",
@@ -90,8 +91,10 @@ export default function TransactionList({ user }) {
   useEffect(() => {
     const qpCategory = searchParams.get("category") ?? "";
     const qpMonth = searchParams.get("month") ?? "";
+    const qpAccount = searchParams.get("account") ?? "";
     setFilterCategory(qpCategory);
     setFilterMonth(qpMonth);
+    setFilterAccount(qpAccount);
   }, [searchParams]);
 
   const setCategoryFilter = (value) => {
@@ -109,6 +112,23 @@ export default function TransactionList({ user }) {
     else next.delete("month");
     setSearchParams(next, { replace: true });
   };
+
+  const setAccountFilter = (value) => {
+    setFilterAccount(value);
+    const next = new URLSearchParams(searchParams);
+    if (value) next.set("account", value);
+    else next.delete("account");
+    setSearchParams(next, { replace: true });
+  };
+
+  useEffect(() => {
+    if (!filterAccount || accounts.length === 0) return;
+    if (!accounts.some((a) => a.id === filterAccount)) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("account");
+      setSearchParams(next, { replace: true });
+    }
+  }, [accounts, filterAccount, searchParams, setSearchParams]);
 
   const toggleTransactionRow = (id) => {
     setSelectedTransactionId((s) => (s === id ? null : id));
@@ -369,6 +389,22 @@ export default function TransactionList({ user }) {
     return merged;
   }, [categories, transactions]);
 
+  const sortedAccountsForFilter = useMemo(
+    () =>
+      [...accounts].sort((a, b) =>
+        String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, {
+          sensitivity: "base",
+        })
+      ),
+    [accounts]
+  );
+
+  /** Subset of txns for month+category insight when an account filter is active. */
+  const transactionsForCategoryInsight = useMemo(() => {
+    if (!filterAccount) return transactions;
+    return transactions.filter((t) => t.accountId === filterAccount);
+  }, [transactions, filterAccount]);
+
   /** When both month and category filters are set, show budget / income context for that period. */
   const categoryMonthInsight = useMemo(() => {
     if (!filterMonth || !filterCategory) return null;
@@ -378,16 +414,17 @@ export default function TransactionList({ user }) {
     const cat = categories.find(
       (c) => String(c.name ?? "").trim() === filterCategory
     );
+    const tx = transactionsForCategoryInsight;
 
     if (!cat) {
       const spentUsd = sumExpenseForCategoryInMonth(
-        transactions,
+        tx,
         filterCategory,
         anchor,
         "USD"
       );
       const incomeUsd = sumIncomeForCategoryInMonth(
-        transactions,
+        tx,
         filterCategory,
         anchor,
         "USD"
@@ -404,7 +441,7 @@ export default function TransactionList({ user }) {
     if (getCategoryKind(cat) === "income") {
       const cur = normalizeCurrency(cat.currency);
       const totalIncome = sumIncomeForCategoryInMonth(
-        transactions,
+        tx,
         filterCategory,
         anchor,
         cur
@@ -420,14 +457,23 @@ export default function TransactionList({ user }) {
 
     const budget = Number(cat.budget);
     const cur = normalizeCurrency(cat.currency);
-    const spent = sumExpenseForCategoryInMonth(
+    const spentCategoryMonth = sumExpenseForCategoryInMonth(
       transactions,
       filterCategory,
       anchor,
       cur
     );
+    const spentOnFilteredAccount = filterAccount
+      ? sumExpenseForCategoryInMonth(tx, filterCategory, anchor, cur)
+      : null;
 
     if (!Number.isFinite(budget) || budget < 0) {
+      const spent = sumExpenseForCategoryInMonth(
+        tx,
+        filterCategory,
+        anchor,
+        cur
+      );
       return {
         kind: "expense-no-budget",
         label,
@@ -437,24 +483,36 @@ export default function TransactionList({ user }) {
       };
     }
 
-    const remaining = budget - spent;
+    const remaining = budget - spentCategoryMonth;
     const pctUsed =
-      budget > 1e-9 ? (spent / budget) * 100 : spent > 0 ? 100 : 0;
-    const over = spent > budget + 1e-9;
+      budget > 1e-9
+        ? (spentCategoryMonth / budget) * 100
+        : spentCategoryMonth > 0
+          ? 100
+          : 0;
+    const over = spentCategoryMonth > budget + 1e-9;
 
     return {
       kind: "expense-budget",
       label,
       category: filterCategory,
       budget,
-      spent,
+      spent: spentCategoryMonth,
+      spentOnFilteredAccount,
       remaining,
       currency: cur,
       pctUsed,
       barWidthPct: Math.min(pctUsed, 100),
       over,
     };
-  }, [filterMonth, filterCategory, categories, transactions]);
+  }, [
+    filterMonth,
+    filterCategory,
+    filterAccount,
+    categories,
+    transactions,
+    transactionsForCategoryInsight,
+  ]);
 
   const filteredTransactions = useMemo(() => {
     let y;
@@ -480,9 +538,12 @@ export default function TransactionList({ user }) {
       if (filterCategory && String(t.category ?? "") !== filterCategory) {
         return false;
       }
+      if (filterAccount && String(t.accountId ?? "") !== filterAccount) {
+        return false;
+      }
       return true;
     });
-  }, [transactions, filterMonth, filterCategory]);
+  }, [transactions, filterMonth, filterCategory, filterAccount]);
 
   const sortedForDisplay = useMemo(
     () =>
@@ -543,6 +604,21 @@ export default function TransactionList({ user }) {
                 ))}
               </select>
             </label>
+            <label className="field-label txn-list__filter">
+              <span className="txn-list__filter-label">Account</span>
+              <select
+                value={filterAccount}
+                onChange={(e) => setAccountFilter(e.target.value)}
+                aria-label="Filter transactions by account"
+              >
+                <option value="">All accounts</option>
+                {sortedAccountsForFilter.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {String(a.name ?? "")}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           {categoryMonthInsight ? (
@@ -553,6 +629,15 @@ export default function TransactionList({ user }) {
               <h3 id="txn-month-insight-title" className="txn-month-insight__title">
                 {categoryMonthInsight.label} · {categoryMonthInsight.category}
               </h3>
+              {filterAccount && accountNameById[filterAccount] ? (
+                <p className="txn-month-insight__scope">
+                  The transaction list is limited to{" "}
+                  <strong>{accountNameById[filterAccount]}</strong>.
+                  {categoryMonthInsight.kind === "expense-budget"
+                    ? " Budget, remaining, and the progress bar use category-wide spending for the month."
+                    : null}
+                </p>
+              ) : null}
               {categoryMonthInsight.kind === "expense-budget" ? (
                 <>
                   <p className="txn-month-insight__lede">
@@ -569,7 +654,11 @@ export default function TransactionList({ user }) {
                       </dd>
                     </div>
                     <div>
-                      <dt>Spent</dt>
+                      <dt>
+                        {categoryMonthInsight.spentOnFilteredAccount != null
+                          ? "Spent (category)"
+                          : "Spent"}
+                      </dt>
                       <dd>
                         {formatMoneyAmount(
                           categoryMonthInsight.spent,
@@ -577,6 +666,17 @@ export default function TransactionList({ user }) {
                         )}
                       </dd>
                     </div>
+                    {categoryMonthInsight.spentOnFilteredAccount != null ? (
+                      <div>
+                        <dt>On this account</dt>
+                        <dd>
+                          {formatMoneyAmount(
+                            categoryMonthInsight.spentOnFilteredAccount,
+                            categoryMonthInsight.currency
+                          )}
+                        </dd>
+                      </div>
+                    ) : null}
                     <div>
                       <dt>Left</dt>
                       <dd
@@ -596,12 +696,15 @@ export default function TransactionList({ user }) {
                       <dt>Used</dt>
                       <dd>
                         {categoryMonthInsight.pctUsed.toFixed(0)}% of budget
+                        {categoryMonthInsight.spentOnFilteredAccount != null
+                          ? " (category-wide)"
+                          : ""}
                       </dd>
                     </div>
                   </dl>
                   <div
                     className="budget-bar budget-bar--txn-insight"
-                    title={`${categoryMonthInsight.pctUsed.toFixed(0)}% of budget`}
+                    title={`${categoryMonthInsight.pctUsed.toFixed(0)}% of budget (category-wide)`}
                   >
                     <div
                       className={
@@ -684,13 +787,14 @@ export default function TransactionList({ user }) {
             <p className="txn-month-insight__hint">
               Select a <strong>month</strong> and a <strong>category</strong> to
               see budget utilization and what was left for that period.
+              Optionally narrow by <strong>account</strong>.
             </p>
           ) : null}
 
           {sortedForDisplay.length === 0 ? (
             <p className="txn-list__empty-filters">
-              No transactions match these filters. Try a different month or
-              category, or clear the filters.
+              No transactions match these filters. Try a different month,
+              category, or account, or clear the filters.
             </p>
           ) : null}
 
